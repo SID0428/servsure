@@ -3,6 +3,7 @@ import math
 import random
 import re
 import uuid
+from uuid import uuid4
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Request, HTTPException, Query
@@ -296,7 +297,10 @@ def format_request_detail(req: ServiceRequestModel, db: Session, user: Optional[
         slot_applicable=bool(getattr(req, "slot_applicable", True)),
         outstation_note=getattr(req, "outstation_note", None),
         visiting_charge=getattr(req, "visiting_charge", 299.0) if getattr(req, "visiting_charge", None) is not None else 299.0,
-        is_visiting_charge_tax_inclusive=getattr(req, "is_visiting_charge_tax_inclusive", True) if getattr(req, "is_visiting_charge_tax_inclusive", None) is not None else True
+        is_visiting_charge_tax_inclusive=getattr(req, "is_visiting_charge_tax_inclusive", True) if getattr(req, "is_visiting_charge_tax_inclusive", None) is not None else True,
+        service_route_preference=getattr(req, "service_route_preference", "company") or "company",
+        dealer_shop_name=getattr(req, "dealer_shop_name", None),
+        branch_name=(db.query(CompanyBranchModel.branch_name).filter(CompanyBranchModel.id == req.branch_id).scalar() if req.branch_id else None)
     )
 
 @router.get("", response_model=List[ServiceRequestDetail])
@@ -859,19 +863,137 @@ def get_available_slots(
         db=db
     )
 
+
+@router.get("/booking-dealers")
+def get_booking_dealers(
+    pincode: Optional[str] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+    db: Session = Depends(get_db)
+):
+    official_companies = db.query(UserModel).filter(UserModel.role == "company", UserModel.is_active == True).all()
+    official_names = {c.name.strip().lower(): c for c in official_companies}
+
+    branches = db.query(CompanyBranchModel).all()
+    dealers = []
+    for b in branches:
+        dist_km = None
+        if (latitude and longitude) or pincode:
+            dist_km = calculate_distance_km(latitude, longitude, pincode, b.latitude, b.longitude, b.pincode)
+
+        raw_comps = getattr(b, "dealer_companies", None) or ""
+        parsed_comps = []
+        if raw_comps:
+            try:
+                if raw_comps.strip().startswith("["):
+                    parsed_comps = json.loads(raw_comps)
+                else:
+                    parsed_comps = [c.strip() for c in raw_comps.split(",") if c.strip()]
+            except Exception:
+                parsed_comps = [c.strip() for c in raw_comps.split(",") if c.strip()]
+
+        is_dealer = getattr(b, "is_dealer_franchise", False) or bool(parsed_comps)
+        comps_info = [
+            {"name": c, "is_official": c.strip().lower() in official_names}
+            for c in parsed_comps
+        ]
+        dealers.append({
+            "id": b.id,
+            "name": b.branch_name,
+            "branch_name": b.branch_name,
+            "shop_name": b.branch_name,
+            "manager_name": b.manager_name,
+            "address": b.address,
+            "pincode": b.pincode,
+            "mobile": b.mobile,
+            "distance_km": dist_km,
+            "is_outstation": bool(dist_km and dist_km > LOCAL_SERVICE_RADIUS_KM),
+            "dealer_companies": parsed_comps,
+            "companies": comps_info,
+            "is_dealer_franchise": is_dealer
+        })
+
+    dealers.sort(key=lambda d: (d["distance_km"] is None, d["distance_km"] or 99999))
+
+    companies_list = []
+    for oc in official_companies:
+        companies_list.append({
+            "name": oc.name.strip(),
+            "is_official": True,
+            "type": "official",
+            "company_id": oc.id,
+            "dealer_shop_name": None,
+            "dealer_branch_id": None
+        })
+
+    seen_names = set(official_names.keys())
+    for d in dealers:
+        for c_name in d["dealer_companies"]:
+            clean_name = c_name.strip()
+            low_name = clean_name.lower()
+            if low_name not in seen_names:
+                seen_names.add(low_name)
+                companies_list.append({
+                    "name": clean_name,
+                    "is_official": False,
+                    "type": "dealer_franchise",
+                    "company_id": None,
+                    "dealer_shop_name": d["branch_name"],
+                    "dealer_branch_id": d["id"]
+                })
+
+    return {
+        "dealers": dealers,
+        "companies": companies_list
+    }
+
+
 @router.post("", response_model=ServiceRequestDetail)
 def create_request(payload: ServiceBookingCreate, request: Request, db: Session = Depends(get_db)):
     user = get_authenticated_user(request, db)
     if user.role != "customer":
         raise HTTPException(status_code=403, detail="Only customers can create service requests")
 
-    appliance = db.query(ApplianceModel).filter(ApplianceModel.id == payload.appliance_id).first()
-    app_brand = appliance.brand if appliance else "Authorized Brand"
+    route_pref = (payload.service_route_preference or "company").strip().lower()
+    chosen_dealer_shop_name = None
+
+    # Extract pincode from payload or address
+    pincode = payload.pincode.strip() if payload.pincode else None
+    addr_to_check = payload.address or user.address or ""
+    if not pincode and addr_to_check:
+        pin_match = re.search(r"\b(\d{6})\b", addr_to_check)
+        if pin_match:
+            pincode = pin_match.group(1)
+
+    # Resolve or create customer appliance if booking directly from franchise without pre-registered appliance
+    appliance = db.query(ApplianceModel).filter(ApplianceModel.id == payload.appliance_id).first() if payload.appliance_id else None
+
+    if not appliance and (route_pref == "franchise" or payload.appliance_name or payload.brand):
+        custom_brand = (payload.brand or "Local Dealer Serviced").strip()
+        custom_app_name = (payload.appliance_name or "Home Appliance").strip()
+        new_app_id = f"app_dlr_{uuid4().hex[:10]}"
+        appliance = ApplianceModel(
+            id=new_app_id,
+            user_id=user.id,
+            company_id=None,
+            brand=custom_brand,
+            appliance_name=custom_app_name,
+            category="General Appliance",
+            model_no="STD-DEALER",
+            registered_on=datetime.utcnow().strftime("%d %b %Y"),
+            warranty_status="Local Dealer Serviced",
+            icon="box"
+        )
+        db.add(appliance)
+        db.flush()
+        payload.appliance_id = new_app_id
+
+    app_brand = (payload.brand or (appliance.brand if appliance else "Authorized Brand")).strip()
     app_model = appliance.model_no if appliance else "STD-01"
 
-    app_name = "Home Appliance"
+    app_name = (payload.appliance_name or "").strip()
     matched_catalog_item = None
-    if appliance:
+    if not app_name and appliance:
         raw_name = (appliance.appliance_name or "").strip()
         cat_match = db.query(CompanyApplianceCatalogModel).filter(
             or_(
@@ -901,43 +1023,52 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
             app_name = f"{appliance.brand.strip()} {appliance.category.strip()}"
         else:
             app_name = f"{appliance.brand.strip()} Appliance"
+    elif not app_name:
+        app_name = "Home Appliance"
 
     # Identify company
     company_id = None
     if appliance and appliance.company_id:
         company_id = appliance.company_id
-    elif appliance and appliance.brand:
+    elif app_brand:
         company_user = db.query(UserModel).filter(
             UserModel.role == "company",
-            UserModel.name.ilike(appliance.brand.strip())
+            UserModel.name.ilike(app_brand)
         ).first()
         if company_user:
             company_id = company_user.id
 
-    if not company_id:
+    if not company_id and route_pref == "company":
         default_company = db.query(UserModel).filter(UserModel.role == "company").first()
         if default_company:
             company_id = default_company.id
 
-    # Extract pincode from payload or address
-    pincode = payload.pincode.strip() if payload.pincode else None
-    addr_to_check = payload.address or user.address or ""
-    if not pincode and addr_to_check:
-        pin_match = re.search(r"\b(\d{6})\b", addr_to_check)
-        if pin_match:
-            pincode = pin_match.group(1)
+    # Strict Brand Franchise Isolation OR Local Dealer Franchise routing
+    if route_pref == "franchise" and payload.branch_id:
+        matched_branch = db.query(CompanyBranchModel).filter(CompanyBranchModel.id == payload.branch_id).first()
+        if not matched_branch:
+            matched_branch = db.query(CompanyBranchModel).first()
+        branch_id = matched_branch.id if matched_branch else None
+        chosen_dealer_shop_name = matched_branch.branch_name if matched_branch else None
 
-    # Strict Brand Franchise Isolation & Proximity Routing
-    # DO NOT send to third-party or competitor branches if no brand franchise exists in this PIN code.
-    # Search for the nearest authorized brand franchise to the customer's address.
-    matched_branch, distance_km, is_outstation, slot_applicable, outstation_note = find_nearest_brand_branch(
-        company_id=company_id,
-        customer_pincode=pincode,
-        customer_lat=payload.latitude,
-        customer_lon=payload.longitude,
-        db=db
-    )
-    branch_id = matched_branch.id if matched_branch else None
+        dist_km = None
+        if matched_branch and ((payload.latitude and payload.longitude) or pincode):
+            dist_km = calculate_distance_km(payload.latitude, payload.longitude, pincode, matched_branch.latitude, matched_branch.longitude, matched_branch.pincode)
+
+        distance_km = dist_km
+        is_outstation = bool(dist_km and dist_km > LOCAL_SERVICE_RADIUS_KM)
+        slot_applicable = not is_outstation
+        outstation_note = None if not is_outstation else f"Doorstep address is {distance_km} km away from {chosen_dealer_shop_name}."
+    else:
+        # Strict Brand Franchise Isolation & Proximity Routing
+        matched_branch, distance_km, is_outstation, slot_applicable, outstation_note = find_nearest_brand_branch(
+            company_id=company_id,
+            customer_pincode=pincode,
+            customer_lat=payload.latitude,
+            customer_lon=payload.longitude,
+            db=db
+        )
+        branch_id = matched_branch.id if matched_branch else None
 
     # Handle appointment slot logic:
     # If the franchise is away from the customer (outstation > 25 km) or no branch exists:
@@ -974,10 +1105,14 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
         completion_otp_code = str(random.randint(1000, 9999))
 
     step1_desc = "Service ticket registered in ServSure platform"
-    if is_outstation and distance_km is not None:
+    if route_pref == "franchise" and chosen_dealer_shop_name:
+        step1_desc = f"Service complaint registered · Routed to local dealer shop: {chosen_dealer_shop_name}"
+    elif is_outstation and distance_km is not None:
         step1_desc = f"Service ticket registered · Outstation flexible scheduling ({distance_km} km away)"
     elif not branch_id:
         step1_desc = "Service ticket registered · Waiting for Brand OEM dispatch"
+
+    step2_desc = f"Awaiting technician dispatch by {chosen_dealer_shop_name}" if (route_pref == "franchise" and chosen_dealer_shop_name) else ("Awaiting assignment by local franchise" if branch_id else "Awaiting brand central dispatch")
 
     initial_timeline = [
         {
@@ -991,7 +1126,7 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
             "id": "step_2",
             "title": "Technician Assignment",
             "timestamp": None,
-            "description": "Awaiting assignment by local franchise" if branch_id else "Awaiting brand central dispatch",
+            "description": step2_desc,
             "state": "pending"
         },
         {
@@ -1050,8 +1185,8 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
         id=new_id,
         customer_id=user.id,
         customer_name=user.name,
-        customer_phone=user.phone,
-        customer_address=payload.address or user.address or "12, Sector 4, Greater Noida",
+        customer_phone=user.phone or None,
+        customer_address=payload.address or user.address or None,
         appliance_id=payload.appliance_id,
         appliance_name=app_name,
         brand=app_brand,
@@ -1067,7 +1202,7 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
         technician_id=None,
         branch_id=branch_id,
         company_id=company_id,
-        pincode=pincode or "201310",
+        pincode=pincode or None,
         latitude=payload.latitude,
         longitude=payload.longitude,
         is_outstation=is_outstation,
@@ -1082,6 +1217,8 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
         is_under_warranty=is_warranty,
         visiting_charge=req_visiting_charge,
         is_visiting_charge_tax_inclusive=req_is_visiting_charge_tax_inclusive,
+        service_route_preference=route_pref,
+        dealer_shop_name=chosen_dealer_shop_name,
         payment_status="Pending",
         timeline_json=json.dumps(initial_timeline)
     )

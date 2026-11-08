@@ -229,8 +229,8 @@ function setProfile(user) {
   if ($("userAvatarHeader")) $("userAvatarHeader").textContent = initials;
   if ($("profileAvatarBig")) $("profileAvatarBig").textContent = initials;
   if ($("profileFullName")) $("profileFullName").textContent = name;
-  if ($("profileEmail")) $("profileEmail").textContent = user.email || "customer@servsure.com";
-  if ($("profilePhone")) $("profilePhone").textContent = user.phone || "+91 98765 43210";
+  if ($("profileEmail")) $("profileEmail").textContent = user.email || "—";
+  if ($("profilePhone")) $("profilePhone").textContent = user.phone || "Not provided";
   if ($("profileAddress")) $("profileAddress").textContent = user.address || "No address provided";
 
   if ($("todayLabel")) {
@@ -244,14 +244,14 @@ function setProfile(user) {
   }
 
   if ($("bookingSavedAddrText")) {
-    $("bookingSavedAddrText").textContent = user.address || "12, Sector 4, Greater Noida, UP - 201310";
+    $("bookingSavedAddrText").textContent = user.address || "No address saved. Please enter your address below.";
   }
   if ($("bookAddress")) {
-    $("bookAddress").value = user.address || "12, Sector 4, Greater Noida, UP - 201310";
+    $("bookAddress").value = user.address || "";
   }
   const m = (user.address || "").match(/\b(\d{6})\b/);
   if ($("bookPincode")) {
-    $("bookPincode").value = m ? m[1] : "201310";
+    $("bookPincode").value = m ? m[1] : "";
   }
 }
 
@@ -1007,6 +1007,7 @@ function renderRequests() {
                       Request ID: <span class="font-semibold text-slate-700">${escapeHtml(
                         request.id
                       )}</span>
+                      ${request.dealer_shop_name ? `<span class="ml-1.5 inline-flex items-center text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">🏪 ${escapeHtml(request.dealer_shop_name)}</span>` : ""}
                     </p>
                   </div>
                 </div>
@@ -1066,9 +1067,10 @@ function renderRequests() {
         .map(
           (request) => `
         <tr class="hover:bg-slate-50/70 transition">
-          <td class="whitespace-nowrap px-5 py-4 font-bold text-[#0066ff] sm:px-6">${escapeHtml(
-            request.id
-          )}</td>
+          <td class="whitespace-nowrap px-5 py-4 font-bold text-[#0066ff] sm:px-6">
+            ${escapeHtml(request.id)}
+            ${request.dealer_shop_name ? `<div class="mt-0.5 text-[10px] font-semibold text-indigo-700">🏪 ${escapeHtml(request.dealer_shop_name)}</div>` : ""}
+          </td>
           <td class="max-w-[230px] px-4 py-4">
             <strong class="block truncate font-semibold text-slate-800">${escapeHtml(
               getRequestApplianceDisplayName(request)
@@ -1136,6 +1138,10 @@ function setTrackingEmpty() {
 let currentAddrMode = "saved";
 let miniMapInstance = null;
 let liveMapInstance = null;
+let currentBookingDealers = [];
+let currentBookingCompanies = [];
+let selectedDealerBranchId = null;
+let currentBookingRoutePref = "company";
 
 function setupAddressModes() {
   const btnSaved = $("addrModeSaved");
@@ -1152,6 +1158,7 @@ function setupAddressModes() {
     if (viewNew) viewNew.classList.toggle("hidden", mode !== "new");
 
     syncBookingAddress();
+    loadBookingDealers();
   }
 
   if (btnSaved) btnSaved.onclick = () => setMode("saved");
@@ -1169,17 +1176,27 @@ function setupAddressModes() {
     $("detectGpsBtn").onclick = detectUserGps;
   }
 
-  ["bookNewHouse", "bookNewCity", "bookNewPincode"].forEach((id) => {
+  ["bookNewHouse", "bookNewCity"].forEach((id) => {
     if ($(id)) $(id).addEventListener("input", syncBookingAddress);
   });
+
+  if ($("bookNewPincode")) {
+    $("bookNewPincode").addEventListener("input", () => {
+      syncBookingAddress();
+      const pin = $("bookNewPincode").value.trim();
+      if (/^\d{6}$/.test(pin)) {
+        loadBookingDealers(pin);
+      }
+    });
+  }
 }
 
 function syncBookingAddress() {
   if (currentAddrMode === "saved") {
-    const saved = currentUser?.address || "12, Sector 4, Greater Noida, UP - 201310";
+    const saved = currentUser?.address || "";
     if ($("bookAddress")) $("bookAddress").value = saved;
     const m = saved.match(/\b(\d{6})\b/);
-    if ($("bookPincode")) $("bookPincode").value = m ? m[1] : "201310";
+    if ($("bookPincode")) $("bookPincode").value = m ? m[1] : (currentUser?.pincode || "");
   } else if (currentAddrMode === "new") {
     const house = $("bookNewHouse")?.value.trim() || "";
     const city = $("bookNewCity")?.value.trim() || "";
@@ -1216,6 +1233,7 @@ function detectUserGps() {
         }
       }, 100);
     }
+    loadBookingDealers(null, lat, lng);
     showToast("Live GPS location captured successfully!", "success");
   }
 
@@ -1227,6 +1245,199 @@ function detectUserGps() {
     );
   } else {
     applyCoords(28.4744, 77.5040);
+  }
+}
+
+function setupBookingRoutePreference() {
+  const cardCompany = $("routeCardCompany");
+  const cardFranchise = $("routeCardFranchise");
+  const radioCompany = $("routePrefCompany");
+  const radioFranchise = $("routePrefFranchise");
+  const brandSelect = $("bookDealerBrandSelect");
+
+  if (cardCompany) cardCompany.addEventListener("click", () => setBookingRoute("company"));
+  if (cardFranchise) cardFranchise.addEventListener("click", () => setBookingRoute("franchise"));
+
+  if (radioCompany) radioCompany.addEventListener("change", () => setBookingRoute("company"));
+  if (radioFranchise) radioFranchise.addEventListener("change", () => setBookingRoute("franchise"));
+
+  if (brandSelect) {
+    brandSelect.addEventListener("change", (e) => {
+      const isCustom = e.target.value === "__custom__";
+      if ($("bookCustomBrandContainer")) {
+        $("bookCustomBrandContainer").classList.toggle("hidden", !isCustom);
+        if (isCustom) $("bookCustomBrandInput")?.focus();
+      }
+    });
+  }
+}
+
+function setBookingRoute(route) {
+  currentBookingRoutePref = route;
+  const cardCompany = $("routeCardCompany");
+  const cardFranchise = $("routeCardFranchise");
+  const radioCompany = $("routePrefCompany");
+  const radioFranchise = $("routePrefFranchise");
+  const viewCompany = $("bookingCompanyRouteView");
+  const viewFranchise = $("bookingFranchiseRouteView");
+
+  if (route === "company") {
+    if (radioCompany) radioCompany.checked = true;
+    if (cardCompany) cardCompany.className = "relative cursor-pointer p-3.5 rounded-xl border-2 border-blue-500 bg-blue-50/50 flex items-start gap-3 transition shadow-xs";
+    if (cardFranchise) cardFranchise.className = "relative cursor-pointer p-3.5 rounded-xl border-2 border-slate-200 hover:border-slate-300 bg-white flex items-start gap-3 transition";
+    if (viewCompany) viewCompany.classList.remove("hidden");
+    if (viewFranchise) viewFranchise.classList.add("hidden");
+  } else {
+    if (radioFranchise) radioFranchise.checked = true;
+    if (cardFranchise) cardFranchise.className = "relative cursor-pointer p-3.5 rounded-xl border-2 border-indigo-500 bg-indigo-50/50 flex items-start gap-3 transition shadow-xs";
+    if (cardCompany) cardCompany.className = "relative cursor-pointer p-3.5 rounded-xl border-2 border-slate-200 hover:border-slate-300 bg-white flex items-start gap-3 transition";
+    if (viewFranchise) viewFranchise.classList.remove("hidden");
+    if (viewCompany) viewCompany.classList.add("hidden");
+    if (!currentBookingDealers.length) {
+      loadBookingDealers();
+    }
+  }
+}
+
+async function loadBookingDealers(pincode = null, lat = null, lng = null) {
+  const list = $("nearbyDealersList");
+  if (!list) return;
+
+  const pin = pincode || $("bookPincode")?.value || currentUser?.pincode;
+  const latitude = lat !== null ? lat : ($("bookLat")?.value ? parseFloat($("bookLat").value) : null);
+  const longitude = lng !== null ? lng : ($("bookLng")?.value ? parseFloat($("bookLng").value) : null);
+
+  const queryParams = new URLSearchParams();
+  if (pin) queryParams.set("pincode", pin);
+  if (latitude !== null && !isNaN(latitude)) queryParams.set("latitude", String(latitude));
+  if (longitude !== null && !isNaN(longitude)) queryParams.set("longitude", String(longitude));
+
+  try {
+    const res = await readApiJson(`/api/requests/booking-dealers?${queryParams.toString()}`);
+    currentBookingDealers = Array.isArray(res.dealers) ? res.dealers : [];
+    currentBookingCompanies = Array.isArray(res.companies) ? res.companies : [];
+
+    if (!selectedDealerBranchId || !currentBookingDealers.some(d => d.id === selectedDealerBranchId)) {
+      selectedDealerBranchId = currentBookingDealers[0]?.id || null;
+    }
+
+    renderNearbyDealersList();
+    populateDealerBrandsDropdown();
+  } catch (err) {
+    console.warn("Could not load booking dealers:", err);
+    list.innerHTML = `<div class="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-500 text-center">Unable to load nearby dealer list. You can still enter your brand manually below.</div>`;
+    populateDealerBrandsDropdown();
+  }
+}
+
+function renderNearbyDealersList() {
+  const list = $("nearbyDealersList");
+  if (!list) return;
+
+  if (!currentBookingDealers.length) {
+    list.innerHTML = `
+      <div class="p-3 bg-white rounded-xl border border-amber-200 text-xs text-amber-800 text-center space-y-1">
+        <p class="font-bold">No localized dealer franchise found in this immediate PIN area.</p>
+        <p class="text-[11px] text-amber-700">Central operations will route your complaint to the nearest regional dealer hub.</p>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = currentBookingDealers.map((dealer) => {
+    const isSelected = dealer.id === selectedDealerBranchId;
+    const distText = dealer.distance_km != null ? `${dealer.distance_km} km away` : "Nearby";
+    const comps = Array.isArray(dealer.companies) ? dealer.companies : [];
+
+    return `
+      <div class="dealer-card cursor-pointer p-3 rounded-xl border-2 transition ${
+        isSelected
+          ? "border-indigo-600 bg-indigo-50/70 shadow-xs ring-1 ring-indigo-500/20"
+          : "border-slate-200 hover:border-slate-300 bg-white"
+      }" data-branch-id="${escapeHtml(dealer.id)}">
+        <div class="flex items-start justify-between gap-2">
+          <div class="space-y-0.5 min-w-0">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="text-sm">🏪</span>
+              <strong class="text-xs font-bold text-slate-900 truncate">${escapeHtml(dealer.name)}</strong>
+              <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 uppercase tracking-wider">Local Dealer & Franchise</span>
+            </div>
+            <p class="text-[11px] text-slate-500 truncate">${escapeHtml(dealer.address || dealer.city || "Authorized Dealer Hub")}</p>
+          </div>
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 shrink-0 font-mono">📍 ${distText}</span>
+        </div>
+        ${comps.length ? `
+          <div class="mt-2 pt-1.5 border-t border-slate-100 flex flex-wrap gap-1 items-center">
+            <span class="text-[10px] text-slate-400 font-medium">Franchise for:</span>
+            ${comps.map(c => `
+              <span class="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                c.is_official
+                  ? "bg-blue-100/80 text-blue-800 border border-blue-200"
+                  : "bg-slate-100 text-slate-700 border border-slate-200"
+              }">
+                ${escapeHtml(c.name)}
+                <span class="text-[8px] font-bold ${c.is_official ? "text-blue-600" : "text-slate-400"}">${c.is_official ? "✓ Official Partner" : "Franchise"}</span>
+              </span>
+            `).join("")}
+          </div>
+        ` : ""}
+      </div>
+    `;
+  }).join("");
+
+  list.querySelectorAll(".dealer-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      selectedDealerBranchId = card.dataset.branchId;
+      renderNearbyDealersList();
+      populateDealerBrandsDropdown();
+    });
+  });
+}
+
+function populateDealerBrandsDropdown() {
+  const brandSelect = $("bookDealerBrandSelect");
+  if (!brandSelect) return;
+
+  const currentVal = brandSelect.value;
+  const selectedDealer = currentBookingDealers.find(d => d.id === selectedDealerBranchId);
+  const dealerComps = (selectedDealer && Array.isArray(selectedDealer.companies)) ? selectedDealer.companies : [];
+
+  let html = `<option value="">Select brand / company…</option>`;
+
+  if (dealerComps.length) {
+    html += `<optgroup label="Brands Serviced by ${escapeHtml(selectedDealer.name)}">`;
+    dealerComps.forEach(c => {
+      const tag = c.is_official ? "✓ Officially Listed on ServSure" : "Local Dealer Franchise Brand";
+      html += `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)} (${tag})</option>`;
+    });
+    html += `</optgroup>`;
+  }
+
+  const officialComps = currentBookingCompanies.filter(c => c.is_official);
+  if (officialComps.length) {
+    html += `<optgroup label="Officially Listed Brands on ServSure">`;
+    officialComps.forEach(c => {
+      html += `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)} (Officially Listed)</option>`;
+    });
+    html += `</optgroup>`;
+  }
+
+  const nonOfficialComps = currentBookingCompanies.filter(c => !c.is_official && !dealerComps.some(dc => dc.name.toLowerCase() === c.name.toLowerCase()));
+  if (nonOfficialComps.length) {
+    html += `<optgroup label="Other Known Franchise Brands">`;
+    nonOfficialComps.forEach(c => {
+      html += `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)} (Local Franchise Partner)</option>`;
+    });
+    html += `</optgroup>`;
+  }
+
+  html += `<optgroup label="General & Other Options">`;
+  html += `<option value="Unknown / Multi-brand">❓ I don't know the company / Multi-brand repair</option>`;
+  html += `<option value="__custom__">✏️ Other brand (Enter manually)</option>`;
+  html += `</optgroup>`;
+
+  brandSelect.innerHTML = html;
+  if (currentVal && brandSelect.querySelector(`option[value="${currentVal}"]`)) {
+    brandSelect.value = currentVal;
   }
 }
 
@@ -1273,7 +1484,7 @@ function renderTimeline(steps, request) {
             }
             ${
               showLiveTracking
-                ? `<button type="button" class="mt-1.5 text-xs font-bold text-[#0066ff] hover:underline flex items-center gap-1" onclick="window.openLiveTrackingModal('${request?.id || "SR-7845"}')">
+                ? `<button type="button" class="mt-1.5 text-xs font-bold text-[#0066ff] hover:underline flex items-center gap-1" onclick="window.openLiveTrackingModal('${request?.id || ''}')">
                     <span>Technician on the Way (Live tracking available &gt;)</span>
                    </button>`
                 : ""
@@ -1329,9 +1540,12 @@ function populateTracking(request) {
       `${getRequestApplianceDisplayName(request)}${request.model_no ? ` (${request.model_no})` : ""}`;
   }
   if ($("trackingMeta")) {
+    const dealerBadge = request.dealer_shop_name
+      ? ` · 🏪 ${request.dealer_shop_name}`
+      : (request.service_route_preference === "franchise" && request.branch_name ? ` · 🏪 ${request.branch_name}` : "");
     $("trackingMeta").textContent = `${request.id} · ${formatDate(
       request.appointment_date
-    )}${request.appointment_slot ? ` · ${request.appointment_slot}` : ""}`;
+    )}${request.appointment_slot ? ` · ${request.appointment_slot}` : ""}${dealerBadge}`;
   }
   if ($("trackingIssue")) {
     $("trackingIssue").textContent =
@@ -1345,7 +1559,8 @@ function populateTracking(request) {
     $("trackingTechnician").textContent = technician ? technician.name : "Awaiting Technician Assignment";
   }
   if ($("trackingTechTitle")) {
-    $("trackingTechTitle").textContent = technician?.title || "Your service ticket is being reviewed by the nearest franchise";
+    const dealerInfo = request.dealer_shop_name || (request.service_route_preference === "franchise" ? request.branch_name : null);
+    $("trackingTechTitle").textContent = technician?.title || (dealerInfo ? `Your service ticket is being handled by 🏪 ${dealerInfo}` : "Your service ticket is being reviewed by the nearest franchise");
   }
   if ($("trackingTechRating")) {
     $("trackingTechRating").innerHTML = technician?.rating
@@ -1920,15 +2135,21 @@ function closeDialog(id) {
 }
 
 window.openBookingModal = function (applianceId = "") {
-  if (!userAppliances.length) {
-    showToast("Register an appliance before booking a service visit.");
-    window.openAddApplianceModal();
-    return;
-  }
-  const select = $("bookApplianceSelect");
-  if (select && applianceId) select.value = applianceId;
   if ($("bookingMessage")) $("bookingMessage").textContent = "";
   syncBookingAddress();
+
+  const select = $("bookApplianceSelect");
+  if (select && applianceId) select.value = applianceId;
+
+  if (userAppliances.length === 0) {
+    setBookingRoute("franchise");
+  } else if (applianceId) {
+    setBookingRoute("company");
+  } else {
+    setBookingRoute(currentBookingRoutePref || "company");
+  }
+
+  loadBookingDealers();
   openDialog("bookingDialog");
   if ($("bookDate") && $("bookSlot")) {
     const lat = $("bookLat")?.value ? parseFloat($("bookLat").value) : null;
@@ -2216,26 +2437,67 @@ async function submitBooking(event) {
   if ($("bookingMessage")) $("bookingMessage").textContent = "";
 
   syncBookingAddress();
-  const address = $("bookAddress")?.value.trim() || currentUser?.address || "12, Sector 4, Greater Noida, UP - 201310";
-  const pincode = $("bookPincode")?.value.trim() || (address.match(/\b(\d{6})\b/) ? address.match(/\b(\d{6})\b/)[1] : "201310");
-  const lat = $("bookLat")?.value ? parseFloat($("bookLat").value) : 28.4744;
-  const lng = $("bookLng")?.value ? parseFloat($("bookLng").value) : 77.5040;
+  const address = $("bookAddress")?.value.trim() || currentUser?.address || "";
+  const pincode = $("bookPincode")?.value.trim() || (address.match(/\b(\d{6})\b/) ? address.match(/\b(\d{6})\b/)[1] : null);
+  const lat = $("bookLat")?.value ? parseFloat($("bookLat").value) : null;
+  const lng = $("bookLng")?.value ? parseFloat($("bookLng").value) : null;
+
+  const routePref = document.querySelector('input[name="bookingRoutePref"]:checked')?.value || currentBookingRoutePref || "company";
+
+  let payload = {
+    service_route_preference: routePref,
+    issue: $("bookIssue").value.trim(),
+    preferred_date: $("bookDate").value,
+    preferred_slot: $("bookSlot").value,
+    address: address,
+    pincode: pincode,
+    latitude: lat,
+    longitude: lng,
+    defect_photo: $("bookDefectPhoto")?.value || null,
+  };
+
+  if (routePref === "company") {
+    const applianceId = $("bookApplianceSelect")?.value;
+    if (!applianceId) {
+      if ($("bookingMessage")) $("bookingMessage").textContent = "Please select a registered appliance for official company service.";
+      button.disabled = false;
+      button.textContent = "Confirm & Register Complaint";
+      return;
+    }
+    payload.appliance_id = applianceId;
+  } else {
+    // Franchise route
+    const rawBrand = $("bookDealerBrandSelect")?.value?.trim();
+    const customBrand = $("bookCustomBrandInput")?.value?.trim();
+    const brand = rawBrand === "__custom__" ? customBrand : (rawBrand || "Unknown / Multi-brand");
+    const appName = $("bookDealerAppName")?.value?.trim() || "General Appliance";
+
+    if (!brand) {
+      if ($("bookingMessage")) $("bookingMessage").textContent = "Please select or enter the brand / company name.";
+      button.disabled = false;
+      button.textContent = "Confirm & Register Complaint";
+      return;
+    }
+    if (!appName) {
+      if ($("bookingMessage")) $("bookingMessage").textContent = "Please enter the appliance type / name (e.g. Split AC, Refrigerator).";
+      button.disabled = false;
+      button.textContent = "Confirm & Register Complaint";
+      return;
+    }
+
+    const selectedDealer = currentBookingDealers.find(d => d.id === selectedDealerBranchId);
+    payload.branch_id = selectedDealerBranchId || null;
+    payload.dealer_shop_name = selectedDealer?.name || null;
+    payload.brand = brand;
+    payload.appliance_name = appName;
+    payload.appliance_id = $("bookApplianceSelect")?.value || null;
+  }
 
   try {
     const request = await readApiJson("/api/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        appliance_id: $("bookApplianceSelect").value,
-        issue: $("bookIssue").value.trim(),
-        preferred_date: $("bookDate").value,
-        preferred_slot: $("bookSlot").value,
-        address: address,
-        pincode: pincode,
-        latitude: lat,
-        longitude: lng,
-        defect_photo: $("bookDefectPhoto")?.value || null,
-      }),
+      body: JSON.stringify(payload),
     });
     closeDialog("bookingDialog");
     $("bookingForm").reset();
@@ -2243,6 +2505,7 @@ async function submitBooking(event) {
     if ($("defectPhotoPreview")) $("defectPhotoPreview").src = "";
     if ($("bookDefectPhoto")) $("bookDefectPhoto").value = "";
     if ($("defectPhotoBtnLabel")) $("defectPhotoBtnLabel").textContent = "Attach Photo";
+    if ($("bookCustomBrandContainer")) $("bookCustomBrandContainer").classList.add("hidden");
     if (currentUser?.address && $("bookAddress")) {
       $("bookAddress").value = currentUser.address;
     }
@@ -2257,7 +2520,7 @@ async function submitBooking(event) {
     }
   } finally {
     button.disabled = false;
-    button.textContent = "Confirm booking";
+    button.textContent = "Confirm & Register Complaint";
   }
 }
 
@@ -3083,7 +3346,7 @@ window.openReceiptModal = async function(requestId, showPrevious = false) {
 
   // Customer info
   if ($("receiptCustomerName")) $("receiptCustomerName").textContent = targetReq.customer_name || currentUser?.name || "Valued Customer";
-  if ($("receiptCustomerPhone")) $("receiptCustomerPhone").textContent = targetReq.customer_phone || currentUser?.phone || "";
+  if ($("receiptCustomerPhone")) $("receiptCustomerPhone").textContent = targetReq.customer_phone || currentUser?.phone || "—";
   if ($("receiptCustomerAddress")) $("receiptCustomerAddress").textContent = targetReq.customer_address || currentUser?.address || "Customer doorstep location";
 
   // Branch & Technician
@@ -3532,8 +3795,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   if ($("closeAddress")) {
     $("closeAddress").addEventListener("click", () => closeDialog("addressDialog"));
   }
-  // Setup 3 address selection modes
+  // Setup address selection modes and booking route preference (Official Company vs Local Franchise)
   setupAddressModes();
+  setupBookingRoutePreference();
 
   // Edit profile dialog
   if ($("editProfileBtn")) {

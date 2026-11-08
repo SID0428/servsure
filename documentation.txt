@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.0.1 (Production Release - Company Claims Scope, Purchase Date & Invoice, Appliance Name Resolution)
-Last Updated: October 27, 2026 (03:22 IST)
+Version: 2.0.3 (Production Release - Admin Franchise Dealer Onboarding, Brand Partnerships Catalog & Customer Route Preference Flow)
+Last Updated: November 8, 2026 (17:35 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -332,7 +332,7 @@ All database entities are defined in `backend/app/db/models.py`:
 
 6. `CompanyBranchModel` (`company_branches` table):
    - `id`: String(64), Primary Key.
-   - `company_id`: String(64), ForeignKey("users.id", CASCADE).
+   - `company_id`: String(64), ForeignKey("users.id", CASCADE), Nullable: True (Nullable for independent multi-brand dealer franchises).
    - UniqueConstraint("company_id", "email").
    - `branch_name`, `manager_name`, `email`, `mobile`, `address`, `pincode`.
    - `latitude`, `longitude`: Float, Nullable: True (Physical GPS coordinates for proximity routing).
@@ -340,6 +340,8 @@ All database entities are defined in `backend/app/db/models.py`:
    - `slot_duration_minutes`: Integer (60, 90, 120, 180).
    - `operating_days_json`: Text (JSON array of active working days).
    - `calendar_exceptions_json`: Text (JSON map of date holiday/open overrides).
+   - `dealer_companies`: Text, Nullable: True (Comma-separated or JSON list of company/brand names serviced by the franchise).
+   - `is_dealer_franchise`: Boolean, Default: False (Flag indicating branch is a local multi-brand dealer franchise).
 
 7. `TechnicianModel` (`technicians` table):
    - `id`: String(64), Primary Key.
@@ -383,9 +385,11 @@ All database entities are defined in `backend/app/db/models.py`:
 11. `ServiceRequestModel` (`service_requests` table):
     - `id`: String(64), Primary Key (e.g., `SR-7845`).
     - `customer_id`: String(64), ForeignKey("users.id", CASCADE).
-    - `appliance_id`: String(64), ForeignKey("appliances.id", CASCADE).
+    - `appliance_id`: String(64), ForeignKey("appliances.id", CASCADE), Nullable: True.
     - `technician_id`: String(64), Nullable: True.
     - `branch_id`, `company_id`: String(64), Nullable: True (Strict brand franchise isolation).
+    - `service_route_preference`: String(32), Default: 'company' ('company' for official OEM brand dispatch, 'franchise' for local dealer franchise).
+    - `dealer_shop_name`: String(128), Nullable: True (Designation: Local Dealer Shop Name & Franchise).
     - `issue`: String(256), `description`: Text.
     - `status`: String(32) ("Request Created", "Assigned", "In Progress", "Completed", "Cancelled").
     - `latitude`, `longitude`: Float (Customer doorstep GPS location).
@@ -643,8 +647,17 @@ Request Headers:
 - `PUT /api/admin/companies/{company_id}/access`
   - Body: `{ "is_active": false }`
   - Deactivates company and immediately revokes all company, branch, and tech sessions.
+- `POST /api/admin/branches`:
+  - Body: `{ "branch_name": "Sharma Electronics (Local Dealer Shop & Franchise)", "manager_name": "Rohit Sharma", "email": "sharma.dealer@service.com", "mobile": "+91 98765 43210", "address": "Shop 4, Connaught Place", "pincode": "110001", "dealer_companies": "LG, Samsung, Voltas, Blue Star", "is_dealer_franchise": true }`
+  - Platform Admin can directly onboard an independent local dealer shop / franchise branch.
+  - Prompts Admin for companies whose franchise is with them (`dealer_companies`).
+  - Sets `is_dealer_franchise = True` and links to Admin ID if no parent company is chosen.
+  - Automatically sends onboarding invitation link pointing to the franchise setup portal via Brevo.
+- `PUT /api/admin/branches/{branch_id}/access`:
+  - Body: `{ "is_active": false }`
+  - Toggles franchise branch access and revokes active sessions with cascading revocation.
 - `GET /api/admin/directory/{role}`:
-  - Role `"branch"`: Returns comprehensive list of all franchise branches with branch name, address, pincode, parent company name (`company_name`), manager name, mobile, active status, technician count (`technician_count`), job count (`jobs_count`), `created_at`, `password_set`, and `password_set_at`.
+  - Role `"branch"`: Returns comprehensive list of all franchise branches with branch name, address, pincode, parent company name (`company_name`), manager name, mobile, active status, technician count (`technician_count`), job count (`jobs_count`), `dealer_companies`, `is_dealer_franchise` (with Local Dealer Hub badge), `created_at`, `password_set`, and `password_set_at`.
   - Role `"technician"`: Returns list of all technicians with title/specialty, assigned branch name (`branch_name`), parent company name (`company_name`), mobile, rating, total jobs (`total_jobs`), active status, `created_at`, `password_set`, and `password_set_at`.
   - Role `"customer"`: Returns list of customer users with phone, address, registered appliances count (`appliances_count`), total service requests (`total_requests`), ongoing requests (`ongoing_requests`), completed requests (`completed_requests`), `created_at`, and active status.
   - Role `"company"`: Returns onboarded companies with contact details, `created_at`, `password_set_at`, and onboarding status.
@@ -757,12 +770,37 @@ Request Headers:
     - Same-Day Lead-Time Cutoff: Requires at least 1 hour lead time before slot start (`available: false, reason: "Booking window closed for this slot"`).
     - Full Bookings: When booked >= capacity (`available: false, reason: "Fully Booked"`).
   - Returns: `{ "date": "2026-10-25", "branch_id": "br_1", "branch_name": "South Delhi Branch", "slot_applicable": true, "is_outstation": false, "distance_km": 12.2, "outstation_message": null, "slots": [...] }`.
+- `GET /api/requests/booking-dealers`:
+  - Query parameters:
+    - `pincode` (optional, string): Customer doorstep pincode.
+    - `latitude`, `longitude` (optional, float): Customer doorstep GPS coordinates.
+  - Returns dynamic list of registered local dealer franchises (`dealers`) sorted by physical proximity (`distance_km`) from the customer's address, along with their authorized company partnerships and whether each brand is an official portal partner (`is_official: true`) or an independent franchise partner (`is_official: false`).
+  - Returns a unified `companies` catalog listing officially listed OEM brands on ServSure alongside all independent brands serviced by local dealer franchises.
+  - Used by customer complaint registration to present nearby dealer shop options and brand partnerships before service booking.
 - `POST /api/requests`:
-  - Body: `{ "appliance_id": "app_1", "issue": "Water leaking", "preferred_date": "2026-10-25", "preferred_slot": "10:00 AM - 12:00 PM", "address": "...", "pincode": "...", "latitude": 28.4744, "longitude": 77.5040 }`
-  - Strict Brand Isolation & Routing: Automatically invokes `find_nearest_brand_branch()`. Strictly assigns to the closest authorized franchise of that brand.
-  - If brand has no registered branch: leaves `branch_id = null`, ticket goes to Brand OEM queue for manual dispatch.
-  - Outstation Detection: If nearest branch is > 25.0 km away, sets `is_outstation = true`, `slot_applicable = false`, `distance_km = ...`, and `appointment_slot = "Flexible / Outstation Visit"`.
-  - Validates preferred slot capacity and same-day lead time cutoff only when `slot_applicable == true`.
+  - Body:
+    ```json
+    {
+      "service_route_preference": "franchise",
+      "branch_id": "branch_123",
+      "dealer_shop_name": "Sharma Electronics (Local Dealer Shop & Franchise)",
+      "brand": "Voltas",
+      "appliance_name": "Inverter Split AC",
+      "appliance_id": null,
+      "issue": "Weak cooling",
+      "preferred_date": "2026-11-15",
+      "preferred_slot": "10:00 AM - 12:00 PM",
+      "address": "Shop 4, Connaught Place, New Delhi",
+      "pincode": "110001",
+      "latitude": 28.6139,
+      "longitude": 77.2090,
+      "defect_photo": "data:image/jpeg;base64,..."
+    }
+    ```
+  - Dual Route Flow:
+    - `service_route_preference == "company"`: Routes directly to authorized Brand OEM and nearest brand-specific franchise hub. Requires pre-registered appliance.
+    - `service_route_preference == "franchise"`: Directs complaint to chosen nearby Local Dealer Shop & Franchise. Allows booking without knowing the company or without pre-registering an appliance; backend auto-creates a lightweight appliance record (`Local Dealer Serviced`) under the customer profile.
+  - Proximity & Outstation Detection: Calculates distance from chosen dealer or nearest branch. Sets `is_outstation` and flexible appointment if outside local radius.
   - Automatically generates 4-digit start and completion OTPs.
 - `POST /api/requests/{request_id}/reschedule`:
   - Body: `{ "new_date": "2026-10-26", "new_slot": "04:00 PM - 06:00 PM", "reason": "Customer unavailable" }`
@@ -2263,6 +2301,70 @@ were identified between the initial rough draft documentation and the actual cod
         - Backend: In `/api/company/customers` and `/api/company/customers/{customer_id}`, added `appliance_name`, `purchase_date`, and `invoice_url` to each product object.
         - Frontend: In `renderCustomerProducts(products)`, added an actionable `📄 Purchase Invoice` link button (opening in a new tab via `resolveMediaUrl(p.invoice_url)`)
           and added `Purchase Date` to the 5-column product specifications grid (`Model Number`, `Serial Number`, `Purchase Date`, `Warranty Period`, `AMC Subscription`).
+
+51. FEATURE & PURGE: Optional Mobile Number on Customer Registration, Database Nullability, and Complete Dummy Data Purge Across All Portals
+   - Initial State / Observed Issue:
+     1. During customer registration, if the mobile number field was not filled, hardcoded dummy data (`+91 98765 43210`) or fallback Greater Noida address/pincode (`12, Sector 4, Greater Noida, UP - 201310`, `201310`) was automatically filled or injected into the database/payload.
+     2. Database models (`UserModel.phone`, `ServiceRequestModel.customer_phone`, `ServiceRequestModel.customer_address`) had `nullable=False`, causing SQLite and MySQL to reject user signups without a mobile number (`IntegrityError: NOT NULL constraint failed: users.phone`).
+     3. Hardcoded dummy data (`SR-7845`, `REC-SR-7845`, `LG Inverter AC`, `Rahul Sharma`, `customer@servsure.com`, mock notifications) remained in HTML templates and script fallbacks across Customer, Company, Franchise, Technician, Admin, and Ops portals.
+   - Resolution:
+     1. Optional Mobile Number in Registration Schemas & Endpoints:
+        - `backend/app/schemas/__init__.py`: Changed `CustomerRegistration.phone` and `CustomerRegistrationRequestOtp.phone` to `Optional[str] = Field(default=None, max_length=32)`.
+        - `backend/app/routes/auth.py`: Sanitized `phone = (payload.phone or "").strip() or None` in OTP generation (`request_registration_otp`), OTP verification (`verify_registration_otp`), and direct registration (`register_customer`). Uniqueness checks only execute if `phone` is explicitly supplied.
+        - `backend/app/routes/requests.py`: Removed hardcoded dummy fallback phone and address in `create_request` (`customer_phone=user.phone or None`, `customer_address=payload.address or user.address or None`, `pincode=pincode or None`).
+     2. Database Schema & Startup Nullability Migration:
+        - `backend/app/db/models.py`: Set `UserModel.phone = Column(String(32), nullable=True)` and `ServiceRequestModel.customer_phone = Column(String(32), nullable=True)`.
+        - `backend/app/seeds.py`: Added automated schema migration on startup (`seed_database`) for MySQL (`ALTER TABLE users MODIFY phone VARCHAR(32) NULL`, etc.) and SQLite (table copy migration for `users` and `service_requests`).
+     3. Complete Dummy Data Purge Across All Portals:
+        - `frontend/index.html`: Updated label to `Mobile number (optional)`, removed `required` and `minlength="7"`, updated placeholder to `e.g. 9876543210`.
+        - `frontend/js/auth.js`: Updated technician login placeholder, validated phone length only when entered (`if (phone && phone.length < 7)`), passed `phone: phone || null`.
+        - `frontend/js/dashboard.js`: Cleaned profile fallbacks (`user.email || "—"`, `user.phone || "Not provided"`), removed all fallback dummy addresses, live tracking dummy ticket `SR-7845`, and Greater Noida coordinates.
+        - `frontend/customer-dashboard.html`: Purged hardcoded ticket `SR-7845`, dummy notifications, receipt modal, estimate modal, and pay modal dummy texts.
+        - `frontend/company-dashboard.html`, `frontend/franchise-dashboard.html`, `frontend/technician-dashboard.html`, `frontend/admin-dashboard.html`, `frontend/ops-dashboard.html`: Replaced all dummy receipt, ticket, customer name, phone, address, and profile placeholders with clean null state indicators (`—` or `Not provided`) and placeholder guidance (`e.g. 9876543210`).
+
+52. FEATURE: Admin Franchise Onboarding, Dealer Company Partnerships, and Address-First Customer Route Preference (Company vs Local Dealer Shop & Franchise)
+   - Initial State / User Requirements:
+     1. Admin Franchise Creation: Platform Admin needed the ability to onboard independent local dealer shops and franchise hubs directly from the Admin Portal (`POST /api/admin/branches`), asking the Admin to enter the names of companies whose franchise is with them (`dealer_companies`).
+     2. Brand Transparency (Officially Listed vs Franchise Partners): During complaint registration / service booking by the customer, all companies/brands partnered with nearby dealers must be displayed, clearly indicating whether each company is officially listed on the ServSure portal or is an independent franchise brand.
+     3. Designation as Local Dealer Shop & Franchise: Multi-brand dealer branches must be clearly designated as "Local Dealer Shop Name & Franchise" (e.g. `🏪 Sharma Electronics (Local Dealer Shop & Franchise)`).
+     4. Booking Without Knowing Company: Customers must be able to book service directly with the franchise without knowing the company or for multi-brand/generic repairs (without being blocked by lack of pre-registered appliances).
+     5. Customer Route Preference: During complaint registration, give the customer the choice to register the complaint to the official Brand Company OR to a nearby Local Dealer Shop & Franchise.
+     6. Address-First Modal Sequence: The booking modal must first ask the user to select or enter their doorstep address (saved profile address or new address + PIN + live GPS) so proximity and nearby dealer franchises can be calculated dynamically, then present the service route and appliance options.
+   - Resolution & Architectural Implementation:
+     1. Database Models & Schema Migrations:
+        - `backend/app/db/models.py`:
+          - `CompanyBranchModel`: Set `company_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)`. Added `dealer_companies = Column(Text, nullable=True)` and `is_dealer_franchise = Column(Boolean, nullable=True, default=False)`.
+          - `ServiceRequestModel`: Added `service_route_preference = Column(String(32), nullable=True, default="company")` and `dealer_shop_name = Column(String(128), nullable=True)`.
+        - `backend/app/seeds.py`: Added automatic startup schema migrations for SQLite and MySQL to ensure columns exist on launch.
+     2. Pydantic Schemas & Backend Endpoints:
+        - `backend/app/schemas/__init__.py`:
+          - `CompanyBranchCreate`: Added `dealer_companies: Optional[str] = None`, `company_id: Optional[str] = None`, `is_dealer_franchise: Optional[bool] = False`.
+          - `ServiceBookingCreate`: Made `appliance_id: Optional[str] = None`, added `branch_id: Optional[str] = None`, `service_route_preference: Optional[str] = "company"`, `dealer_shop_name: Optional[str] = None`, `brand: Optional[str] = None`, `appliance_name: Optional[str] = None`.
+          - `ServiceRequestDetail`: Added `service_route_preference`, `dealer_shop_name`, and `branch_name`.
+        - `backend/app/routes/admin.py`:
+          - Added `POST /api/admin/branches` allowing Platform Admin to onboard franchise branches with `dealer_companies`, setting `is_dealer_franchise = True` and dispatching Brevo setup invitations.
+          - Added `PUT /api/admin/branches/{branch_id}/access` with cascading session revocation.
+          - Updated `GET /api/admin/directory/branch` to return `dealer_companies` and `is_dealer_franchise`.
+        - `backend/app/routes/requests.py`:
+          - Added `GET /api/requests/booking-dealers` returning nearby dealer shops sorted by physical distance (`distance_km`) using `calculate_distance_km` (Haversine formula for GPS + PIN code heuristics fallback).
+          - Returned consolidated `companies` list indicating `is_official: true` for OEM platform companies and `is_official: false` for independent franchise brands.
+          - Updated `POST /api/requests` to support `service_route_preference == "franchise"`, auto-creating a lightweight appliance record (`Local Dealer Serviced`) when booking without knowing the company.
+     3. Admin & Ops Portal UI:
+        - `frontend/admin-dashboard.html` & `frontend/ops-dashboard.html`: Updated `branchDialog` to include the `dealer_companies` input ("Companies whose franchise is with them (Brand partnerships)").
+        - `frontend/js/ops-dashboard.js`: Enabled the "Add Franchise" button for Admin, rendered the `🏪 Local Dealer Hub` badge and brand partnership badges in the Directory table, and routed branch form submission to `/api/admin/branches`.
+     4. Customer Dashboard Modal Workflow & Tracking:
+        - `frontend/customer-dashboard.html`: Restructured `bookingDialog` into the address-first sequence:
+          - Step 1: Doorstep Service Address (Saved profile address or New address + PIN + Live GPS).
+          - Step 2: Service Destination Preference Cards (🏢 Official Brand Company vs 🏪 Nearby Local Dealer & Franchise).
+          - Step 3A: Official Brand Company view (registered appliance selector).
+          - Step 3B: Nearby Local Dealer & Franchise view (interactive dealer cards `#nearbyDealersList`, dynamic brand dropdown `#bookDealerBrandSelect` with Official Partner vs Franchise tags, manual brand entry, and "I don't know the company" option).
+          - Steps 4-7: Issue description, preferred date & slots, defect photo, and confirm button.
+        - `frontend/js/dashboard.js`:
+          - Implemented `loadBookingDealers()`, `renderNearbyDealersList()`, `populateDealerBrandsDropdown()`, and `setupBookingRoutePreference()`.
+          - Wired address changes (mode switch, PIN entry, GPS detection) to refresh nearby dealers dynamically.
+          - Removed hard block requiring appliances prior to opening booking modal; defaults to franchise route when user has no registered appliances.
+          - Updated `submitBooking()` to dispatch franchise payloads with `branch_id`, `dealer_shop_name`, `brand`, and `appliance_name`.
+          - Updated `populateTracking()` and request tables to display `🏪 <Local Dealer Shop Name>` and franchise routing tags.
 
 ==================================================
 End of Documentation

@@ -82,6 +82,62 @@ def seed_database(db: Session):
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE users ADD COLUMN created_at DATETIME NULL"))
 
+    # Ensure users.phone and service_requests.customer_phone/customer_address are nullable
+    try:
+        is_mysql = "mysql" in engine.dialect.name.lower()
+        if is_mysql:
+            with engine.begin() as connection:
+                try:
+                    connection.execute(text("ALTER TABLE users MODIFY phone VARCHAR(32) NULL"))
+                except Exception as e:
+                    print(f"⚠️ Note migrating users.phone: {e}")
+                try:
+                    connection.execute(text("ALTER TABLE service_requests MODIFY customer_phone VARCHAR(32) NULL"))
+                    connection.execute(text("ALTER TABLE service_requests MODIFY customer_address TEXT NULL"))
+                except Exception as e:
+                    print(f"⚠️ Note migrating service_requests columns: {e}")
+        else:
+            users_cols = {col["name"]: col for col in inspect(engine).get_columns("users")}
+            if users_cols.get("phone") and not users_cols["phone"].get("nullable", True):
+                with engine.begin() as connection:
+                    connection.execute(text("PRAGMA foreign_keys=OFF;"))
+                    connection.execute(text("DROP TABLE IF EXISTS users__temp;"))
+                    row = connection.execute(text("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")).fetchone()
+                    if row and "NOT NULL" in row[0]:
+                        sql = row[0]
+                        new_sql = sql.replace("CREATE TABLE users", "CREATE TABLE users__temp").replace('"users"', '"users__temp"').replace("phone VARCHAR(32) NOT NULL", "phone VARCHAR(32) NULL")
+                        connection.execute(text(new_sql))
+                        cols = list(users_cols.keys())
+                        cols_str = ", ".join(cols)
+                        connection.execute(text(f"INSERT INTO users__temp ({cols_str}) SELECT {cols_str} FROM users;"))
+                        connection.execute(text("DROP TABLE users;"))
+                        connection.execute(text("ALTER TABLE users__temp RENAME TO users;"))
+                        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email);"))
+                        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_id ON users (id);"))
+            sr_cols = {col["name"]: col for col in inspect(engine).get_columns("service_requests")}
+            if (sr_cols.get("customer_phone") and not sr_cols["customer_phone"].get("nullable", True)) or (sr_cols.get("customer_address") and not sr_cols["customer_address"].get("nullable", True)):
+                with engine.begin() as connection:
+                    connection.execute(text("PRAGMA foreign_keys=OFF;"))
+                    connection.execute(text("DROP TABLE IF EXISTS service_requests__temp;"))
+                    row = connection.execute(text("SELECT sql FROM sqlite_master WHERE type='table' AND name='service_requests'")).fetchone()
+                    if row and "NOT NULL" in row[0]:
+                        sql = row[0]
+                        new_sql = sql.replace("CREATE TABLE service_requests", "CREATE TABLE service_requests__temp").replace('"service_requests"', '"service_requests__temp"').replace("customer_phone VARCHAR(32) NOT NULL", "customer_phone VARCHAR(32) NULL").replace("customer_address TEXT NOT NULL", "customer_address TEXT NULL")
+                        connection.execute(text(new_sql))
+                        cols = list(sr_cols.keys())
+                        cols_str = ", ".join(cols)
+                        connection.execute(text(f"INSERT INTO service_requests__temp ({cols_str}) SELECT {cols_str} FROM service_requests;"))
+                        connection.execute(text("DROP TABLE service_requests;"))
+                        connection.execute(text("ALTER TABLE service_requests__temp RENAME TO service_requests;"))
+                        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_service_requests_id ON service_requests (id);"))
+                        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_service_requests_customer_id ON service_requests (customer_id);"))
+                        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_service_requests_branch_id ON service_requests (branch_id);"))
+                        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_service_requests_company_id ON service_requests (company_id);"))
+                        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_service_requests_pincode ON service_requests (pincode);"))
+    except Exception as e:
+        print(f"⚠️ Nullability migration note: {e}")
+
+
     appliance_columns = {column["name"] for column in inspect(engine).get_columns("appliances")}
     if "appliance_name" not in appliance_columns:
         with engine.begin() as connection:
@@ -232,6 +288,12 @@ def seed_database(db: Session):
     if "completion_otp_requested_at" not in req_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE service_requests ADD COLUMN completion_otp_requested_at VARCHAR(64) NULL"))
+    if "service_route_preference" not in req_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE service_requests ADD COLUMN service_route_preference VARCHAR(32) DEFAULT 'company'"))
+    if "dealer_shop_name" not in req_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE service_requests ADD COLUMN dealer_shop_name VARCHAR(128) NULL"))
 
     existing_tables = set(inspect(engine).get_table_names())
     if "company_appliances" in existing_tables:
@@ -302,6 +364,12 @@ def seed_database(db: Session):
     if "longitude" not in branch_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE company_branches ADD COLUMN longitude FLOAT NULL"))
+    if "dealer_companies" not in branch_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE company_branches ADD COLUMN dealer_companies TEXT NULL"))
+    if "is_dealer_franchise" not in branch_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE company_branches ADD COLUMN is_dealer_franchise BOOLEAN DEFAULT 0"))
 
     # Auto-heal legacy appliances where appliance_name is NULL or generic 'brand category' (e.g. 'gelistra Other')
     try:

@@ -5,7 +5,7 @@ const roleSettings = {
   customer: { title: "Sign in to your account", subtitle: "Manage your home services, all in one place.", identifier: "Email or phone number", placeholder: "you@example.com", type: "text", destination: "./customer-dashboard.html" },
   company: { title: "Company sign in", subtitle: "Manage your organization and service network.", identifier: "Work email", placeholder: "name@company.com", type: "text", destination: "./company-dashboard.html" },
   franchise: { title: "Franchise sign in", subtitle: "Access your location and service operations.", identifier: "Email or phone number", placeholder: "you@example.com", type: "text", destination: "./franchise-dashboard.html" },
-  technician: { title: "Technician sign in", subtitle: "View your assigned jobs and keep service moving.", identifier: "Work email or phone number", placeholder: "you@example.com or +91 98765 43210", type: "text", destination: "./technician-dashboard.html" },
+  technician: { title: "Technician sign in", subtitle: "View your assigned jobs and keep service moving.", identifier: "Work email or phone number", placeholder: "you@example.com or mobile number", type: "text", destination: "./technician-dashboard.html" },
   admin: { title: "ServSure admin sign in", subtitle: "Sign in with your ServSure administrator credentials.", identifier: "Administrator email", placeholder: "admin@servsure.com", type: "email", destination: "./admin-dashboard.html" },
 };
 const config = roleSettings[role] || roleSettings.customer;
@@ -240,10 +240,16 @@ async function handleSignupRequestOtp(event) {
     return;
   }
 
+  const phone = (byId("signupPhone")?.value || "").trim();
+  if (phone && phone.length < 7) {
+    setMessage("Please enter a valid mobile number or leave it blank.", false, "signupMessage");
+    return;
+  }
+
   const payload = {
     name: byId("signupName").value.trim(),
     email: byId("signupEmail").value.trim().toLowerCase(),
-    phone: byId("signupPhone").value.trim(),
+    phone: phone || null,
     password,
     address: byId("signupAddress").value.trim() || null,
   };

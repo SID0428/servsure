@@ -8,7 +8,7 @@ class UserModel(Base):
     id = Column(String(64), primary_key=True, index=True)
     name = Column(String(128), nullable=False)
     email = Column(String(128), unique=True, index=True, nullable=False)
-    phone = Column(String(32), nullable=False)
+    phone = Column(String(32), nullable=True)
     role = Column(String(32), nullable=False, default="customer") # customer, technician, branch, company, admin
     password_hash = Column(String(255), nullable=True)
     avatar = Column(Text, nullable=True)
@@ -61,7 +61,7 @@ class CompanyBranchModel(Base):
     __table_args__ = (UniqueConstraint("company_id", "email", name="uq_company_branch_email"),)
 
     id = Column(String(64), primary_key=True, index=True)
-    company_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     branch_name = Column(String(128), nullable=False)
     manager_name = Column(String(128), nullable=False)
     email = Column(String(128), nullable=False)
@@ -76,6 +76,8 @@ class CompanyBranchModel(Base):
     operating_days_json = Column(Text, nullable=True, default='["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]')
     calendar_exceptions_json = Column(Text, nullable=True, default='{}')
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    dealer_companies = Column(Text, nullable=True)
+    is_dealer_franchise = Column(Boolean, nullable=True, default=False)
 
 class TechnicianModel(Base):
     __tablename__ = "technicians"
@@ -145,8 +147,8 @@ class ServiceRequestModel(Base):
     id = Column(String(64), primary_key=True, index=True) # e.g. SR-7845
     customer_id = Column(String(64), ForeignKey("users.id"), nullable=False, index=True)
     customer_name = Column(String(128), nullable=False)
-    customer_phone = Column(String(32), nullable=False)
-    customer_address = Column(Text, nullable=False)
+    customer_phone = Column(String(32), nullable=True)
+    customer_address = Column(Text, nullable=True)
     appliance_id = Column(String(64), nullable=False)
     appliance_name = Column(String(128), nullable=False)
     brand = Column(String(64), nullable=False)
@@ -195,6 +197,8 @@ class ServiceRequestModel(Base):
     outstation_note = Column(String(256), nullable=True)
     visiting_charge = Column(Float, nullable=True, default=299.0)
     is_visiting_charge_tax_inclusive = Column(Boolean, nullable=True, default=True)
+    service_route_preference = Column(String(32), nullable=True, default="company") # "company" or "franchise"
+    dealer_shop_name = Column(String(128), nullable=True)
 
 class JobCardModel(Base):
     __tablename__ = "job_cards"

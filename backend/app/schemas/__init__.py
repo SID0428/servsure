@@ -43,14 +43,14 @@ class LoginRequest(BaseModel):
 class CustomerRegistration(BaseModel):
     name: str = Field(min_length=2, max_length=128)
     email: str = Field(min_length=5, max_length=128, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-    phone: str = Field(min_length=7, max_length=32)
+    phone: Optional[str] = Field(default=None, max_length=32)
     password: str = Field(min_length=10, max_length=128)
     address: Optional[str] = Field(default=None, max_length=512)
 
 class CustomerRegistrationRequestOtp(BaseModel):
     name: str = Field(min_length=2, max_length=128)
     email: str = Field(min_length=5, max_length=128, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-    phone: str = Field(min_length=7, max_length=32)
+    phone: Optional[str] = Field(default=None, max_length=32)
     password: str = Field(min_length=10, max_length=128)
     address: Optional[str] = Field(default=None, max_length=512)
 
@@ -81,6 +81,9 @@ class CompanyBranchCreate(BaseModel):
     mobile: str = Field(min_length=7, max_length=32)
     address: str = Field(min_length=5, max_length=512)
     pincode: str = Field(min_length=6, max_length=10)
+    dealer_companies: Optional[str] = None
+    company_id: Optional[str] = None
+    is_dealer_franchise: Optional[bool] = False
 
 class BranchCredentialsEmail(BaseModel):
     branch_id: str
@@ -305,9 +308,12 @@ class ServiceRequestDetail(BaseModel):
     outstation_note: Optional[str] = None
     visiting_charge: Optional[float] = 299.0
     is_visiting_charge_tax_inclusive: Optional[bool] = True
+    service_route_preference: Optional[str] = "company"
+    dealer_shop_name: Optional[str] = None
+    branch_name: Optional[str] = None
 
 class ServiceBookingCreate(BaseModel):
-    appliance_id: str
+    appliance_id: Optional[str] = None
     issue: str
     description: Optional[str] = None
     priority: str = "Medium"
@@ -318,6 +324,11 @@ class ServiceBookingCreate(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     defect_photo: Optional[str] = None
+    branch_id: Optional[str] = None
+    service_route_preference: Optional[str] = "company"
+    brand: Optional[str] = None
+    appliance_name: Optional[str] = None
+    dealer_shop_name: Optional[str] = None
 
 class TimeSlotInfo(BaseModel):
     slot: str

@@ -17,7 +17,7 @@ from app.db.models import (
     JobCardModel
 )
 from app.db.session import get_db
-from app.schemas import AccessTogglePayload, CompanyCreate, CompanyCredentialsEmail, CompanyOtpVerify, CompanyPasswordSetup
+from app.schemas import AccessTogglePayload, CompanyCreate, CompanyCredentialsEmail, CompanyOtpVerify, CompanyPasswordSetup, CompanyBranchCreate
 from app.security import get_authenticated_user, revoke_all_user_sessions
 from app.email_service import send_brevo_email
 
@@ -313,12 +313,14 @@ def list_directory(role: str, request: Request, db: Session = Depends(get_db)):
                 "branch_name": b.branch_name,
                 "manager_name": b.manager_name,
                 "company_id": b.company_id,
-                "company_name": company.name if company else "ServSure Network",
+                "company_name": company.name if company else ("Multi-Brand Local Dealer Hub" if getattr(b, "is_dealer_franchise", False) or getattr(b, "dealer_companies", None) else "ServSure Network"),
                 "email": b.email,
                 "phone": b.mobile,
                 "mobile": b.mobile,
                 "address": b.address,
                 "pincode": b.pincode,
+                "dealer_companies": getattr(b, "dealer_companies", None),
+                "is_dealer_franchise": bool(getattr(b, "is_dealer_franchise", False)),
                 "is_active": getattr(b_user, "is_active", False) if b_user else False,
                 "password_set": pw_set,
                 "password_set_at": pw_set_at,
@@ -657,6 +659,133 @@ def send_company_credentials(payload: CompanyCredentialsEmail, request: Request,
     issue_invite(company, onboarding)
     db.commit()
     return {"status": "sent", "email": company.email, "message": "Password setup link sent"}
+
+
+@router.post("/branches", status_code=201)
+def create_admin_branch(payload: CompanyBranchCreate, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    email = payload.email.strip().lower()
+    if db.query(UserModel).filter(UserModel.email.ilike(email)).first():
+        raise HTTPException(status_code=409, detail="A ServSure account with this email already exists")
+    if not os.getenv("BREVO_API_KEY") or not os.getenv("BREVO_SENDER_EMAIL"):
+        raise HTTPException(status_code=503, detail="Brevo is not configured. Set BREVO_API_KEY and BREVO_SENDER_EMAIL on the backend.")
+
+    branch_id = f"branch_{uuid4().hex[:12]}"
+    company_id = payload.company_id if payload.company_id else admin.id
+    dealer_companies_val = (payload.dealer_companies or "").strip() or None
+    is_dealer = bool(payload.is_dealer_franchise or dealer_companies_val or not payload.company_id)
+
+    branch = CompanyBranchModel(
+        id=branch_id,
+        company_id=company_id,
+        branch_name=payload.branch_name.strip(),
+        manager_name=payload.manager_name.strip(),
+        email=email,
+        mobile=payload.mobile.strip(),
+        address=payload.address.strip(),
+        pincode=payload.pincode.strip(),
+        dealer_companies=dealer_companies_val,
+        is_dealer_franchise=is_dealer,
+        created_at=datetime.utcnow(),
+    )
+    branch_user = UserModel(
+        id=branch_id,
+        name=branch.manager_name,
+        email=email,
+        phone=branch.mobile,
+        role="branch",
+        address=f"{branch.address}, {branch.pincode}",
+        password_hash=None,
+        is_active=False,
+        created_at=datetime.utcnow(),
+    )
+    onboarding = BranchOnboardingModel(branch_id=branch_id)
+    db.add(branch_user)
+    try:
+        db.flush()
+        db.add_all([branch, onboarding])
+        db.flush()
+
+        token = secrets.token_urlsafe(32)
+        onboarding.invite_token_hash = digest(token)
+        onboarding.invite_expires_at = datetime.utcnow() + timedelta(hours=48)
+        frontend_url = os.getenv("FRONTEND_BASE_URL", "https://servsure.vercel.app").rstrip("/")
+        setup_url = f"{frontend_url}/franchise-setup.html?token={token}"
+
+        parent_company = db.query(UserModel).filter(UserModel.id == company_id).first()
+        inviter_name = parent_company.name if (parent_company and parent_company.role == "company") else "ServSure Platform Administrator"
+
+        brands_html = f"<li><strong>Represented Brand Partnerships:</strong> {html.escape(dealer_companies_val)}</li>" if dealer_companies_val else ""
+        brands_txt = f"\nRepresented Brands: {dealer_companies_val}" if dealer_companies_val else ""
+
+        send_brevo_email(
+            branch.email,
+            branch.manager_name,
+            "Your ServSure franchise portal is ready",
+            f"Hello {branch.manager_name},\n\nYour franchise branch / local dealer hub has been registered on ServSure by {inviter_name}.\n\nBranch: {branch.branch_name}\nAddress: {branch.address}, {branch.pincode}{brands_txt}\n\nSet up your password and verify your email using this link (valid for 48 hours):\n{setup_url}\n\nYour registered login email is {branch.email}.",
+            f"<p>Hello {html.escape(branch.manager_name)},</p><p>Your franchise branch / local dealer hub has been registered on ServSure by <strong>{html.escape(inviter_name)}</strong>.</p><ul><li><strong>Branch:</strong> {html.escape(branch.branch_name)}</li><li><strong>Address:</strong> {html.escape(branch.address)}, {html.escape(branch.pincode)}</li>{brands_html}</ul><p>Create your password and verify your email using the link below. The link expires in 48 hours.</p><p><a href=\"{html.escape(setup_url, quote=True)}\">Set up your franchise portal password</a></p><p>Registered login email: <strong>{html.escape(branch.email)}</strong></p>",
+        )
+        db.commit()
+        db.refresh(branch)
+
+        return {
+            "id": branch.id,
+            "name": branch.branch_name,
+            "branch_name": branch.branch_name,
+            "manager_name": branch.manager_name,
+            "company_id": branch.company_id,
+            "company_name": inviter_name if inviter_name != "ServSure Platform Administrator" else "Multi-Brand Local Dealer Hub",
+            "email": branch.email,
+            "phone": branch.mobile,
+            "mobile": branch.mobile,
+            "address": branch.address,
+            "pincode": branch.pincode,
+            "dealer_companies": branch.dealer_companies,
+            "is_dealer_franchise": branch.is_dealer_franchise,
+            "is_active": False,
+            "password_set": False,
+            "password_set_at": None,
+            "created_at": branch.created_at.isoformat() + "Z",
+            "total_techs": 0,
+            "total_jobs": 0,
+            "ongoing_jobs": 0,
+            "role": "branch",
+            "avatar": branch.branch_name[:2].upper()
+        }
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.put("/branches/{branch_id}/access")
+def toggle_admin_branch_access(branch_id: str, payload: AccessTogglePayload, request: Request, db: Session = Depends(get_db)):
+    require_admin(request, db)
+    branch = db.query(CompanyBranchModel).filter(CompanyBranchModel.id == branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Franchise branch not found")
+
+    branch_user = db.query(UserModel).filter(
+        (UserModel.id == branch.id) | (UserModel.email == branch.email)
+    ).first()
+    if branch_user:
+        branch_user.is_active = payload.is_active
+
+    if not payload.is_active:
+        if branch_user:
+            revoke_all_user_sessions(branch_user.id, db)
+        revoke_all_user_sessions(branch.id, db)
+        tech_links = db.query(BranchTechnicianModel).filter(BranchTechnicianModel.branch_id == branch.id).all()
+        for bt in tech_links:
+            revoke_all_user_sessions(bt.technician_id, db)
+
+    db.commit()
+    if branch_user:
+        db.refresh(branch_user)
+    return {
+        "status": "success",
+        "message": f"Franchise branch access {'enabled' if payload.is_active else 'disabled'} successfully",
+        "is_active": payload.is_active
+    }
 
 
 def get_setup_context(token: str, email: str, db: Session):

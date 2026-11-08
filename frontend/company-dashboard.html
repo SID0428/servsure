@@ -85,9 +85,10 @@
       </div>
     </main>
   </div>
-  <dialog id="companyDialog" class="company-dialog"><form id="companyForm"><div class="dialog-heading"><div><div class="section-kicker">COMPANY DIRECTORY</div><h2>Add a company</h2><p>Create a company account. ServSure will automatically email a password setup link.</p></div><button type="button" class="dialog-close" id="closeCompanyDialog" aria-label="Close">×</button></div><label>Company name<input name="name" required maxlength="128" placeholder="Example Industries"></label><label>Admin email<input name="email" type="email" required placeholder="admin@example.com"></label><label>Phone<input name="phone" required maxlength="32" placeholder="+91 98765 43210"></label><label>Address <span class="optional-label">Optional</span><textarea name="address" rows="2" placeholder="Company address"></textarea></label><p class="dialog-message" id="companyFormMessage" aria-live="polite"></p><div class="dialog-actions"><button type="button" class="secondary-button" id="cancelCompany">Cancel</button><button type="submit" class="primary-action">Create company</button></div></form></dialog>
-  <dialog id="branchDialog" class="company-dialog"><form id="branchForm"><div class="dialog-heading"><div><div class="section-kicker">BRANCH DIRECTORY</div><h2>Add a branch</h2><p>Add a branch and its franchise owner or manager contact details.</p></div><button type="button" class="dialog-close" id="closeBranchDialog" aria-label="Close">×</button></div><label>Branch name<input name="branch_name" required minlength="2" maxlength="128" placeholder="Example: Noida Sector 18"></label><label>Franchise owner or manager<input name="manager_name" required minlength="2" maxlength="128" placeholder="Full name"></label><label>Email<input name="email" type="email" required maxlength="128" placeholder="manager@example.com"></label><label>Mobile number<input name="mobile" type="tel" required minlength="7" maxlength="32" placeholder="+91 98765 43210"></label><label>Address<textarea name="address" rows="2" required minlength="5" maxlength="512" placeholder="Street, area, city, state"></textarea></label><label>Pincode<input name="pincode" required minlength="6" maxlength="10" inputmode="numeric" placeholder="201301"></label><p class="dialog-message" id="branchFormMessage" aria-live="polite"></p><div class="dialog-actions"><button type="button" class="secondary-button" id="cancelBranch">Cancel</button><button type="submit" class="primary-action">Save branch</button></div></form></dialog>
-  <dialog id="technicianDialog" class="company-dialog"><form id="technicianForm"><div class="dialog-heading"><div><div class="section-kicker">TECHNICIAN DIRECTORY</div><h2>Add a technician</h2><p>Save the technician to this franchise and email a password setup link.</p></div><button type="button" class="dialog-close" id="closeTechnicianDialog" aria-label="Close">×</button></div><label>Technician name<input name="name" required minlength="2" maxlength="128" placeholder="Full name"></label><label>Technician title or specialty<input name="title" required minlength="2" maxlength="128" placeholder="Appliance service technician"></label><label>Email<input name="email" type="email" required maxlength="128" placeholder="technician@example.com"></label><label>Mobile number<input name="mobile" type="tel" required minlength="7" maxlength="32" placeholder="+91 98765 43210"></label><label>Address<textarea name="address" rows="2" required minlength="5" maxlength="512" placeholder="Street, area, city, state"></textarea></label><label>Pincode<input name="pincode" required minlength="6" maxlength="10" inputmode="numeric" placeholder="201301"></label><p class="dialog-message" id="technicianFormMessage" aria-live="polite"></p><div class="dialog-actions"><button type="button" class="secondary-button" id="cancelTechnician">Cancel</button><button type="submit" class="primary-action">Save technician</button></div></form></dialog>
+  <dialog id="companyDialog" class="company-dialog"><form id="companyForm"><div class="dialog-heading"><div><div class="section-kicker">COMPANY DIRECTORY</div><h2>Add a company</h2><p>Create a company account. ServSure will automatically email a password setup link.</p></div><button type="button" class="dialog-close" id="closeCompanyDialog" aria-label="Close">×</button></div><label>Company name<input name="name" required maxlength="128" placeholder="Example Industries"></label><label>Admin email<input name="email" type="email" required placeholder="admin@example.com"></label><label>Phone<input name="phone" required maxlength="32" placeholder="e.g. 9876543210"></label>
+<label>Address <span class="optional-label">Optional</span><textarea name="address" rows="2" placeholder="Company address"></textarea></label><p class="dialog-message" id="companyFormMessage" aria-live="polite"></p><div class="dialog-actions"><button type="button" class="secondary-button" id="cancelCompany">Cancel</button><button type="submit" class="primary-action">Create company</button></div></form></dialog>
+  <dialog id="branchDialog" class="company-dialog"><form id="branchForm"><div class="dialog-heading"><div><div class="section-kicker">BRANCH DIRECTORY</div><h2>Add a branch</h2><p>Add a branch and its franchise owner or manager contact details.</p></div><button type="button" class="dialog-close" id="closeBranchDialog" aria-label="Close">×</button></div><label>Branch name<input name="branch_name" required minlength="2" maxlength="128" placeholder="Example: Noida Sector 18"></label><label>Franchise owner or manager<input name="manager_name" required minlength="2" maxlength="128" placeholder="Full name"></label><label>Email<input name="email" type="email" required maxlength="128" placeholder="manager@example.com"></label><label>Mobile number<input name="mobile" type="tel" required minlength="7" maxlength="32" placeholder="e.g. 9876543210"></label><label>Address<textarea name="address" rows="2" required minlength="5" maxlength="512" placeholder="Street, area, city, state"></textarea></label><label>Pincode<input name="pincode" required minlength="6" maxlength="10" inputmode="numeric" placeholder="201301"></label><p class="dialog-message" id="branchFormMessage" aria-live="polite"></p><div class="dialog-actions"><button type="button" class="secondary-button" id="cancelBranch">Cancel</button><button type="submit" class="primary-action">Save branch</button></div></form></dialog>
+  <dialog id="technicianDialog" class="company-dialog"><form id="technicianForm"><div class="dialog-heading"><div><div class="section-kicker">TECHNICIAN DIRECTORY</div><h2>Add a technician</h2><p>Save the technician to this franchise and email a password setup link.</p></div><button type="button" class="dialog-close" id="closeTechnicianDialog" aria-label="Close">×</button></div><label>Technician name<input name="name" required minlength="2" maxlength="128" placeholder="Full name"></label><label>Technician title or specialty<input name="title" required minlength="2" maxlength="128" placeholder="Appliance service technician"></label><label>Email<input name="email" type="email" required maxlength="128" placeholder="technician@example.com"></label><label>Mobile number<input name="mobile" type="tel" required minlength="7" maxlength="32" placeholder="e.g. 9876543210"></label><label>Address<textarea name="address" rows="2" required minlength="5" maxlength="512" placeholder="Street, area, city, state"></textarea></label><label>Pincode<input name="pincode" required minlength="6" maxlength="10" inputmode="numeric" placeholder="201301"></label><p class="dialog-message" id="technicianFormMessage" aria-live="polite"></p><div class="dialog-actions"><button type="button" class="secondary-button" id="cancelTechnician">Cancel</button><button type="submit" class="primary-action">Save technician</button></div></form></dialog>
   <dialog id="companyApplianceDialog" class="company-dialog">
     <form id="companyApplianceForm">
       <input type="hidden" name="editing_appliance_id" id="editingApplianceId" value="">
@@ -478,11 +479,11 @@
         <div class="grid grid-cols-2 gap-2.5">
           <div class="p-3 bg-slate-50 rounded-xl">
             <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Email</span>
-            <strong id="opsProfileEmailText" class="text-slate-800 text-xs font-semibold block mt-0.5 truncate">email@example.com</strong>
+            <strong id="opsProfileEmailText" class="text-slate-800 text-xs font-semibold block mt-0.5 truncate">—</strong>
           </div>
           <div class="p-3 bg-slate-50 rounded-xl">
             <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Mobile</span>
-            <strong id="opsProfilePhoneText" class="text-slate-800 text-xs font-semibold block mt-0.5">+91 98765 43210</strong>
+            <strong id="opsProfilePhoneText" class="text-slate-800 text-xs font-semibold block mt-0.5">Not provided</strong>
           </div>
           <div class="col-span-2 p-3 bg-slate-50 rounded-xl">
             <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Address</span>
@@ -564,10 +565,10 @@
         <div>
           <div class="flex items-center gap-2">
             <span class="text-[10px] font-bold tracking-[.16em] text-blue-600 uppercase">SERVICE REQUEST DETAILS</span>
-            <span id="ticketModalPriority" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700">Medium</span>
+            <span id="ticketModalPriority" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700">—</span>
           </div>
           <div class="flex items-center gap-3 mt-1">
-            <h3 class="font-display text-xl font-bold text-slate-900" id="ticketModalReqId">SR-7845</h3>
+            <h3 class="font-display text-xl font-bold text-slate-900" id="ticketModalReqId">—</h3>
             <div id="ticketModalStatusWrap"></div>
           </div>
           <p class="text-xs text-slate-400 mt-0.5">Created on <span id="ticketModalCreatedAt" class="text-slate-600 font-medium">—</span></p>
@@ -745,11 +746,11 @@
           <div class="p-3 space-y-1.5 text-xs bg-neutral-50/40">
             <div class="flex justify-between items-center">
               <span class="font-semibold text-neutral-700">Invoice No:</span>
-              <span id="opsReceiptInvoiceNo" class="font-mono font-black text-black text-sm">REC-SR-7845</span>
+              <span id="opsReceiptInvoiceNo" class="font-mono font-black text-black text-sm">—</span>
             </div>
             <div class="flex justify-between items-center">
               <span class="font-semibold text-neutral-700">Invoice Date:</span>
-              <span id="opsReceiptDate" class="font-mono font-medium text-black">19 Oct 2026, 03:30 PM</span>
+              <span id="opsReceiptDate" class="font-mono font-medium text-black">—</span>
             </div>
             <div class="flex justify-between items-center">
               <span class="font-semibold text-neutral-700">Place of Supply:</span>
@@ -767,17 +768,17 @@
           <!-- Billed To (Customer) -->
           <div class="p-3 border-b sm:border-b-0 sm:border-r border-black space-y-1">
             <div class="text-[10px] font-bold uppercase tracking-wider text-neutral-600 border-b border-black/20 pb-0.5 mb-1">Billed To (Customer / Recipient)</div>
-            <div id="opsReceiptCustomerName" class="font-bold text-sm text-black">Customer Name</div>
-            <div><span class="font-semibold">Phone:</span> <span id="opsReceiptCustomerPhone" class="font-mono">+91 98765 43210</span></div>
-            <div><span class="font-semibold">Service Address:</span> <span id="opsReceiptCustomerAddress" class="text-neutral-800">Doorstep Address</span></div>
+            <div id="opsReceiptCustomerName" class="font-bold text-sm text-black">—</div>
+            <div><span class="font-semibold">Phone:</span> <span id="opsReceiptCustomerPhone" class="font-mono">—</span></div>
+            <div><span class="font-semibold">Service Address:</span> <span id="opsReceiptCustomerAddress" class="text-neutral-800">—</span></div>
           </div>
           <!-- Service Center & Technician -->
           <div class="p-3 space-y-1">
             <div class="text-[10px] font-bold uppercase tracking-wider text-neutral-600 border-b border-black/20 pb-0.5 mb-1">Authorized Service Center & Job Details</div>
             <div><span class="font-semibold">Franchise:</span> <span id="opsReceiptBranchName">ServSure Authorized Franchise Partner</span></div>
-            <div><span class="font-semibold">Technician:</span> <span id="opsReceiptTechName">Rahul Sharma</span></div>
-            <div><span class="font-semibold">Appliance Serviced:</span> <span id="opsReceiptApplianceDetails" class="font-medium">LG Inverter AC (LG-INV-15)</span></div>
-            <div><span class="font-semibold">Service Diagnostic:</span> <span id="opsReceiptIssueDescription" class="text-neutral-800">Cooling repair</span></div>
+            <div><span class="font-semibold">Technician:</span> <span id="opsReceiptTechName">—</span></div>
+            <div><span class="font-semibold">Appliance Serviced:</span> <span id="opsReceiptApplianceDetails" class="font-medium">—</span></div>
+            <div><span class="font-semibold">Service Diagnostic:</span> <span id="opsReceiptIssueDescription" class="text-neutral-800">—</span></div>
           </div>
         </div>
 

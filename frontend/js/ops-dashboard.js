@@ -546,7 +546,7 @@ function renderPage(page) {
 
   const admin = role === "admin";
   setHidden("addCompanyButton", !admin);
-  setHidden("addBranchButton", !(role === "company" && page === "Branches"));
+  setHidden("addBranchButton", !(page === "Branches" && (role === "company" || role === "admin")));
   setHidden("addTechnicianButton", !(role === "franchise" && page === "Technicians"));
   setHidden("addApplianceCatalogButton", !(role === "company" && page === "Appliances"));
   setHidden("companyInlineAdd", !admin || page !== "Companies");
@@ -1156,7 +1156,7 @@ function renderHelpCenterView() {
   $("tableSubtitle").textContent = "Emergency helpline, safety SOPs, and franchise supervisor contacts.";
   $("requestHead").innerHTML = ["Support resource", "Contact / Details", "Hours", "Action"].map((l) => `<th>${safe(l)}</th>`).join("");
   $("requestRows").innerHTML = `
-    <tr><td>Franchise Branch Supervisor</td><td>${safe(user?.branch_name || 'Assigned Branch')}</td><td>8:00 AM – 8:00 PM</td><td><a href="tel:+919876543210" class="table-action font-semibold text-blue-600">📞 Call branch →</a></td></tr>
+    <tr><td>Franchise Branch Supervisor</td><td>${safe(user?.branch_name || 'Assigned Branch')}</td><td>8:00 AM – 8:00 PM</td><td>${user?.branch_phone ? `<a href="tel:${safe(user.branch_phone)}" class="table-action font-semibold text-blue-600">📞 Call branch →</a>` : `<span class="text-slate-400">Contact branch supervisor</span>`}</td></tr>
     <tr><td>Technical Parts & Spare Support</td><td>Spares Desk · Crompton / LG / Whirlpool</td><td>9:00 AM – 6:00 PM</td><td><a href="mailto:spares@servsure.com" class="table-action font-semibold text-blue-600">✉ Email desk →</a></td></tr>
     <tr><td>Emergency Field Hotline</td><td>Safety & roadside assistance</td><td>24x7 Available</td><td><a href="tel:112" class="table-action font-semibold text-rose-600">🚨 112 / Emergency</a></td></tr>
   `;
@@ -6372,17 +6372,18 @@ window.openAdminTechnicianDetail = openAdminTechnicianDetail;
 
 function renderAdminBranches() {
   $("metricGrid").hidden = true;
+  setHidden("addBranchButton", false);
   $("requestSearch").placeholder = "Search branches by name, manager, parent company, or address";
   $("tableTitle").textContent = "Branches";
-  $("tableSubtitle").textContent = "Authorized franchise branch service hubs across all partner brands.";
+  $("tableSubtitle").textContent = "Authorized franchise branch service hubs and local dealer shops across partner brands.";
   $("sidePanelTitle").textContent = "Branch network";
   $("healthContent").innerHTML = `<div class="section-empty"><strong>${directoryRows.length}</strong> active franchise branches</div>`;
-  $("activityContent").innerHTML = `<div class="section-empty">Each branch is linked to an authorized brand partner with its dedicated technician roster.</div>`;
+  $("activityContent").innerHTML = `<div class="section-empty">Each branch is linked to an authorized brand partner or operates as a multi-brand dealer hub.</div>`;
   $("requestHead").innerHTML = ["Branch & Manager", "Parent Company", "Contact Information", "Created On", "Password Set", "Staff & Workload", "Status", "Action"].map((label) => `<th>${label}</th>`).join("");
 
   const query = ($("requestSearch")?.value || "").trim().toLowerCase();
   const filtered = directoryRows.filter((item) =>
-    [item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode]
+    [item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode, item.dealer_companies]
       .join(" ")
       .toLowerCase()
       .includes(query)
@@ -6392,6 +6393,7 @@ function renderAdminBranches() {
     ? filtered.map((b) => {
         const isPwSet = Boolean(b.password_set || b.password_set_at);
         const isAccessActive = b.is_active !== false;
+        const isDealer = Boolean(b.is_dealer_franchise || b.dealer_companies);
         let statusBadge = "";
         if (!isPwSet) {
           statusBadge = '<span class="status-pill pending">Pending Setup</span>';
@@ -6404,11 +6406,15 @@ function renderAdminBranches() {
         return `
         <tr>
           <td>
-            <strong class="text-slate-900 block font-bold">${safe(b.branch_name || b.name)}</strong>
-            <small class="text-slate-500">👤 Manager: ${safe((b.manager_name && b.manager_name !== "—") ? b.manager_name : "Not assigned")}</small>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <strong class="text-slate-900 block font-bold">${safe(b.branch_name || b.name)}</strong>
+              ${isDealer ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">🏪 Local Dealer Hub</span>' : ''}
+            </div>
+            <small class="text-slate-500 block">👤 Manager: ${safe((b.manager_name && b.manager_name !== "—") ? b.manager_name : "Not assigned")}</small>
+            ${b.dealer_companies ? `<small class="text-[10px] text-blue-600 block mt-0.5 font-medium">🏷️ Brands: ${safe(b.dealer_companies)}</small>` : ''}
           </td>
           <td>
-            <span class="inline-flex items-center gap-1 font-semibold text-slate-800">🏢 ${safe(b.company_name || "ServSure Partner")}</span>
+            <span class="inline-flex items-center gap-1 font-semibold text-slate-800">${isDealer ? '🏪 Multi-Brand Local Dealer' : `🏢 ${safe(b.company_name || "ServSure Partner")}`}</span>
           </td>
           <td>
             <span class="block text-slate-700 text-xs">✉️ ${safe(b.email)}</span>
@@ -7496,13 +7502,13 @@ window.openOpsReceiptModal = async function(requestId, showPrevious = false) {
     $("opsReceiptPaidBadge").className = "inline-block border border-black px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-black bg-white";
   }
 
-  if ($("opsReceiptCustomerName")) $("opsReceiptCustomerName").textContent = (req.customer_phone ? req.customer_name : "Authorized Customer") || "Customer";
-  if ($("opsReceiptCustomerPhone")) $("opsReceiptCustomerPhone").textContent = req.customer_phone || "";
-  if ($("opsReceiptCustomerAddress")) $("opsReceiptCustomerAddress").textContent = (req.customer_phone ? req.customer_address : "Customer doorstep — details on file") || "Customer doorstep location";
+  if ($("opsReceiptCustomerName")) $("opsReceiptCustomerName").textContent = req.customer_name || "Customer";
+  if ($("opsReceiptCustomerPhone")) $("opsReceiptCustomerPhone").textContent = req.customer_phone || "—";
+  if ($("opsReceiptCustomerAddress")) $("opsReceiptCustomerAddress").textContent = req.customer_address || "Customer doorstep location";
 
   // Also support admin dashboard IDs
-  if ($("opsReceiptCustName")) $("opsReceiptCustName").textContent = (req.customer_phone ? req.customer_name : "Authorized Customer") || "Customer";
-  if ($("opsReceiptCustPhone")) $("opsReceiptCustPhone").textContent = req.customer_phone || "";
+  if ($("opsReceiptCustName")) $("opsReceiptCustName").textContent = req.customer_name || "Customer";
+  if ($("opsReceiptCustPhone")) $("opsReceiptCustPhone").textContent = req.customer_phone || "—";
   if ($("opsReceiptCustAddr")) $("opsReceiptCustAddr").textContent = req.customer_address || "Customer doorstep location";
 
   const techName = showPrevious
@@ -8537,7 +8543,7 @@ window.openTechRouteMap = function(requestId) {
         iconAnchor: [17, 17]
       });
       L.marker([customerLat, customerLng], { icon: homeIcon }).addTo(map)
-        .bindPopup(`<b>Customer Doorstep</b><br><b>${safe(targetReq.customer_name)}</b><br>${safe(targetReq.customer_address || 'Service Location')}<br><small>PIN: ${safe(targetReq.pincode || '201310')}</small>`);
+        .bindPopup(`<b>Customer Doorstep</b><br><b>${safe(targetReq.customer_name || 'Customer')}</b><br>${safe(targetReq.customer_address || 'Service Location')}${targetReq.pincode ? `<br><small>PIN: ${safe(targetReq.pincode)}</small>` : ''}`);
 
       // Technician Marker (Blue Bike with expanding pulse radar ring)
       const techIcon = L.divIcon({
@@ -8627,7 +8633,7 @@ window.openTechRouteMap = function(requestId) {
             <strong style="color:#1d4ed8">${safe(req.id)}</strong><br>
             <b>${safe(req.customer_name)}</b><br>
             ${safe(req.appliance_name || 'Appliance')}<br>
-            <span style="color:#64748b">${safe(req.customer_address || '')} (PIN: ${safe(req.pincode || '201310')})</span><br>
+            <span style="color:#64748b">${safe(req.customer_address || '')}${req.pincode ? ` (PIN: ${safe(req.pincode)})` : ''}</span><br>
             <span style="display:inline-block;margin-top:4px;padding:2px 6px;border-radius:4px;background:#e0f2fe;color:#0369a1;font-weight:600">${safe(req.status_badge)}</span>
           </div>
         `);
@@ -9216,11 +9222,22 @@ function initEvents() {
 
   $("branchForm")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = event.currentTarget; const submit = form.querySelector('[type="submit"]');
-    if (submit) submit.disabled = true; if ($("branchFormMessage")) $("branchFormMessage").textContent = "Saving branch…";
+    if (submit) submit.disabled = true; if ($("branchFormMessage")) $("branchFormMessage").textContent = "Saving franchise branch…";
     const payload = Object.fromEntries(new FormData(form).entries());
     try {
-      const created = await companyApi("/branches", { method: "POST", body: JSON.stringify(payload) });
-      branches.push(created); form.reset(); $("branchDialog")?.close(); renderCompanyBranches(); showToast(`${created.branch_name} added. Franchise setup link sent to ${created.email}.`);
+      const created = role === "admin"
+        ? await adminApi("/branches", { method: "POST", body: JSON.stringify(payload) })
+        : await companyApi("/branches", { method: "POST", body: JSON.stringify(payload) });
+      if (role === "admin") {
+        directoryRows.push(created);
+        renderAdminBranches();
+      } else {
+        branches.push(created);
+        renderCompanyBranches();
+      }
+      form.reset();
+      $("branchDialog")?.close();
+      showToast(`${created.branch_name} added. Franchise setup link sent to ${created.email}.`, "success");
     } catch (error) { if ($("branchFormMessage")) $("branchFormMessage").textContent = error.message; }
     finally { if (submit) submit.disabled = false; }
   });
@@ -9598,9 +9615,9 @@ function initEvents() {
 function populateOpsProfileModal() {
   const displayName = user?.name || "ServSure User";
   const displayRole = user?.role || role || "technician";
-  const displayEmail = user?.email || "user@servsure.in";
-  const displayPhone = user?.phone || user?.mobile || "+91 98765 43210";
-  const displayTitle = user?.title || "Field Service Specialist";
+  const displayEmail = user?.email || "—";
+  const displayPhone = user?.phone || user?.mobile || "Not provided";
+  const displayTitle = user?.title || "—";
   const displayBranch = user?.branch_name || user?.company_branch || (user?.branch_id ? `Branch #${user?.branch_id}` : "");
 
   let displayAddr = user?.address || "Not provided";
@@ -9631,7 +9648,7 @@ function populateOpsProfileModal() {
   }
 
   if ($("editOpsName")) $("editOpsName").value = displayName;
-  if ($("editOpsPhone")) $("editOpsPhone").value = (displayPhone === "+91 98765 43210" && !user?.phone) ? "" : displayPhone;
+  if ($("editOpsPhone")) $("editOpsPhone").value = user?.phone || user?.mobile || "";
   if ($("editOpsAddress")) $("editOpsAddress").value = user?.address || "";
   if ($("editOpsMessage")) $("editOpsMessage").textContent = "";
 

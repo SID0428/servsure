@@ -180,12 +180,16 @@ def get_auth_config():
 @router.post("/register/request-otp")
 def request_registration_otp(payload: CustomerRegistrationRequestOtp, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
-    phone = payload.phone.strip()
+    phone = (payload.phone or "").strip() or None
 
     # Check if an account already exists with this email or phone
-    existing = db.query(UserModel).filter(
-        (UserModel.email.ilike(email)) | (UserModel.phone == phone)
-    ).first()
+    if phone:
+        existing = db.query(UserModel).filter(
+            (UserModel.email.ilike(email)) | (UserModel.phone == phone)
+        ).first()
+    else:
+        existing = db.query(UserModel).filter(UserModel.email.ilike(email)).first()
+
     if existing:
         raise HTTPException(
             status_code=409,
@@ -410,14 +414,21 @@ def google_auth(payload: GoogleAuthPayload, response: Response, db: Session = De
 @router.post("/register", status_code=201)
 def register_customer(payload: CustomerRegistration, response: Response, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
-    if db.query(UserModel).filter(UserModel.email.ilike(email)).first():
-        raise HTTPException(status_code=409, detail="An account with this email already exists. Sign in instead.")
+    phone = (payload.phone or "").strip() or None
+    if phone:
+        existing = db.query(UserModel).filter(
+            (UserModel.email.ilike(email)) | (UserModel.phone == phone)
+        ).first()
+    else:
+        existing = db.query(UserModel).filter(UserModel.email.ilike(email)).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="An account with this email or mobile number already exists. Sign in instead.")
 
     user = UserModel(
         id=f"customer_{uuid4().hex[:12]}",
         name=payload.name.strip(),
         email=email,
-        phone=payload.phone.strip(),
+        phone=phone,
         role="customer",
         password_hash=make_password_hash(payload.password),
         address=(payload.address or "").strip() or None,
