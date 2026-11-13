@@ -17,6 +17,7 @@ from app.db.models import (
     JobCardModel
 )
 from app.db.session import get_db
+from app.schemas import AccessTogglePayload, CompanyCreate, CompanyCredentialsEmail, CompanyOtpVerify, CompanyPasswordSetup
 from app.schemas import AccessTogglePayload, CompanyCreate, CompanyCredentialsEmail, CompanyOtpVerify, CompanyPasswordSetup, CompanyBranchCreate
 from app.security import get_authenticated_user, revoke_all_user_sessions
 from app.email_service import send_brevo_email
@@ -313,6 +314,7 @@ def list_directory(role: str, request: Request, db: Session = Depends(get_db)):
                 "branch_name": b.branch_name,
                 "manager_name": b.manager_name,
                 "company_id": b.company_id,
+                "company_name": company.name if company else "ServSure Network",
                 "company_name": company.name if company else ("Multi-Brand Local Dealer Hub" if getattr(b, "is_dealer_franchise", False) or getattr(b, "dealer_companies", None) else "ServSure Network"),
                 "email": b.email,
                 "phone": b.mobile,

@@ -546,6 +546,7 @@ function renderPage(page) {
 
   const admin = role === "admin";
   setHidden("addCompanyButton", !admin);
+  setHidden("addBranchButton", !(role === "company" && page === "Branches"));
   setHidden("addBranchButton", !(page === "Branches" && (role === "company" || role === "admin")));
   setHidden("addTechnicianButton", !(role === "franchise" && page === "Technicians"));
   setHidden("addApplianceCatalogButton", !(role === "company" && page === "Appliances"));
@@ -6375,14 +6376,17 @@ function renderAdminBranches() {
   setHidden("addBranchButton", false);
   $("requestSearch").placeholder = "Search branches by name, manager, parent company, or address";
   $("tableTitle").textContent = "Branches";
+  $("tableSubtitle").textContent = "Authorized franchise branch service hubs across all partner brands.";
   $("tableSubtitle").textContent = "Authorized franchise branch service hubs and local dealer shops across partner brands.";
   $("sidePanelTitle").textContent = "Branch network";
   $("healthContent").innerHTML = `<div class="section-empty"><strong>${directoryRows.length}</strong> active franchise branches</div>`;
+  $("activityContent").innerHTML = `<div class="section-empty">Each branch is linked to an authorized brand partner with its dedicated technician roster.</div>`;
   $("activityContent").innerHTML = `<div class="section-empty">Each branch is linked to an authorized brand partner or operates as a multi-brand dealer hub.</div>`;
   $("requestHead").innerHTML = ["Branch & Manager", "Parent Company", "Contact Information", "Created On", "Password Set", "Staff & Workload", "Status", "Action"].map((label) => `<th>${label}</th>`).join("");
 
   const query = ($("requestSearch")?.value || "").trim().toLowerCase();
   const filtered = directoryRows.filter((item) =>
+    [item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode]
     [item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode, item.dealer_companies]
       .join(" ")
       .toLowerCase()
@@ -6406,6 +6410,8 @@ function renderAdminBranches() {
         return `
         <tr>
           <td>
+            <strong class="text-slate-900 block font-bold">${safe(b.branch_name || b.name)}</strong>
+            <small class="text-slate-500">👤 Manager: ${safe((b.manager_name && b.manager_name !== "—") ? b.manager_name : "Not assigned")}</small>
             <div class="flex items-center gap-1.5 flex-wrap">
               <strong class="text-slate-900 block font-bold">${safe(b.branch_name || b.name)}</strong>
               ${isDealer ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">🏪 Local Dealer Hub</span>' : ''}
@@ -6414,6 +6420,7 @@ function renderAdminBranches() {
             ${b.dealer_companies ? `<small class="text-[10px] text-blue-600 block mt-0.5 font-medium">🏷️ Brands: ${safe(b.dealer_companies)}</small>` : ''}
           </td>
           <td>
+            <span class="inline-flex items-center gap-1 font-semibold text-slate-800">🏢 ${safe(b.company_name || "ServSure Partner")}</span>
             <span class="inline-flex items-center gap-1 font-semibold text-slate-800">${isDealer ? '🏪 Multi-Brand Local Dealer' : `🏢 ${safe(b.company_name || "ServSure Partner")}`}</span>
           </td>
           <td>
@@ -9024,7 +9031,17 @@ function initEvents() {
 
   $("addCompanyButton")?.addEventListener("click", () => { if ($("companyFormMessage")) $("companyFormMessage").textContent = ""; $("companyDialog")?.showModal(); });
   $("companyInlineAdd")?.addEventListener("click", () => { if ($("companyFormMessage")) $("companyFormMessage").textContent = ""; $("companyDialog")?.showModal(); });
-  $("addBranchButton")?.addEventListener("click", () => { if ($("branchFormMessage")) $("branchFormMessage").textContent = ""; $("branchDialog")?.showModal(); });
+  $("addBranchButton")?.addEventListener("click", async () => {
+    if ($("branchFormMessage")) $("branchFormMessage").textContent = "";
+    if (role === "admin") {
+      $("dealerCompaniesContainer")?.classList.remove("hidden");
+      resetDealerCompaniesDropdown();
+      await populateDealerCompaniesDropdown();
+    } else {
+      $("dealerCompaniesContainer")?.classList.add("hidden");
+    }
+    $("branchDialog")?.showModal();
+  });
   $("addTechnicianButton")?.addEventListener("click", () => { if ($("technicianFormMessage")) $("technicianFormMessage").textContent = ""; $("technicianDialog")?.showModal(); });
   $("addApplianceCatalogButton")?.addEventListener("click", () => {
     if ($("editingApplianceId")) $("editingApplianceId").value = "";
@@ -9042,8 +9059,8 @@ function initEvents() {
 
   $("closeCompanyDialog")?.addEventListener("click", () => $("companyDialog")?.close());
   $("cancelCompany")?.addEventListener("click", () => $("companyDialog")?.close());
-  $("closeBranchDialog")?.addEventListener("click", () => $("branchDialog")?.close());
-  $("cancelBranch")?.addEventListener("click", () => $("branchDialog")?.close());
+  $("closeBranchDialog")?.addEventListener("click", () => { resetDealerCompaniesDropdown(); $("branchDialog")?.close(); });
+  $("cancelBranch")?.addEventListener("click", () => { resetDealerCompaniesDropdown(); $("branchDialog")?.close(); });
   $("closeTechnicianDialog")?.addEventListener("click", () => $("technicianDialog")?.close());
   $("cancelTechnician")?.addEventListener("click", () => $("technicianDialog")?.close());
   $("closeCompanyApplianceDialog")?.addEventListener("click", () => $("companyApplianceDialog")?.close());
@@ -9220,9 +9237,208 @@ function initEvents() {
     finally { if (submit) submit.disabled = false; }
   });
 
+  // Represented Companies Multi-Select Dropdown in Branch Dialog
+  let selectedDealerCompanies = new Set();
+  let isDealerOtherActive = false;
+
+  function updateDealerCompaniesState() {
+    const hiddenInput = $("branchDealerCompanies");
+    const chipsContainer = $("dealerSelectedChips");
+    const placeholder = $("dealerCompaniesPlaceholder");
+    const otherInput = $("dealerOtherCompaniesInput");
+
+    const registeredList = Array.from(selectedDealerCompanies);
+    let otherList = [];
+    if (isDealerOtherActive && otherInput && otherInput.value.trim()) {
+      otherList = otherInput.value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+
+    const allCompanies = [...registeredList, ...otherList];
+    if (hiddenInput) {
+      hiddenInput.value = allCompanies.join(", ");
+    }
+
+    if (placeholder) {
+      if (allCompanies.length === 0) {
+        placeholder.textContent = "Select represented companies…";
+        placeholder.className = "truncate text-slate-500";
+      } else {
+        placeholder.textContent = `${allCompanies.length} brand${allCompanies.length > 1 ? "s" : ""} selected (${allCompanies.join(", ")})`;
+        placeholder.className = "truncate text-slate-800 font-semibold";
+      }
+    }
+
+    if (chipsContainer) {
+      chipsContainer.innerHTML = allCompanies
+        .map((comp) => {
+          const isOther = otherList.includes(comp);
+          return `
+            <span class="dealer-chip ${isOther ? 'bg-amber-50 text-amber-800 border-amber-200' : ''}">
+              <span>${safe(comp)}</span>
+              ${isOther ? '<span class="text-[9px] text-amber-600 font-normal">(Other)</span>' : ''}
+              <button type="button" data-remove-company="${safe(comp)}" aria-label="Remove ${safe(comp)}">✕</button>
+            </span>
+          `;
+        })
+        .join("");
+
+      chipsContainer.querySelectorAll("[data-remove-company]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const target = btn.getAttribute("data-remove-company");
+          if (selectedDealerCompanies.has(target)) {
+            selectedDealerCompanies.delete(target);
+            const chk = $(`dealer_comp_${target.replace(/[^a-zA-Z0-9_-]/g, "_")}`);
+            if (chk) chk.checked = false;
+          } else if (isDealerOtherActive && otherInput) {
+            const remaining = otherInput.value
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => s && s.toLowerCase() !== target.toLowerCase());
+            otherInput.value = remaining.join(", ");
+          }
+          updateDealerCompaniesState();
+        });
+      });
+    }
+  }
+
+  async function populateDealerCompaniesDropdown() {
+    const listContainer = $("dealerRegisteredCompaniesList");
+    if (!listContainer) return;
+
+    if ((!companies || companies.length === 0) && role === "admin") {
+      try {
+        companies = await adminApi("/companies");
+      } catch {
+        companies = [];
+      }
+    }
+
+    const companyNames = (companies || [])
+      .map((c) => (c.name || c.company_name || "").trim())
+      .filter(Boolean)
+      .filter((name, idx, arr) => arr.indexOf(name) === idx)
+      .sort((a, b) => a.localeCompare(b));
+
+    if (companyNames.length === 0) {
+      listContainer.innerHTML = `<div class="px-2 py-1.5 text-xs text-slate-400">No registered companies available</div>`;
+      return;
+    }
+
+    listContainer.innerHTML = companyNames
+      .map((name) => {
+        const idSafe = `dealer_comp_${name.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+        const isChecked = selectedDealerCompanies.has(name);
+        return `
+          <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-xs text-slate-700 dealer-company-row" data-company-name="${safe(name)}">
+            <input type="checkbox" id="${idSafe}" value="${safe(name)}" ${isChecked ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 dealer-company-checkbox">
+            <span class="font-medium text-slate-800">${safe(name)}</span>
+            <span class="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-semibold uppercase tracking-wider">Registered</span>
+          </label>
+        `;
+      })
+      .join("");
+
+    listContainer.querySelectorAll(".dealer-company-checkbox").forEach((chk) => {
+      chk.addEventListener("change", () => {
+        if (chk.checked) {
+          selectedDealerCompanies.add(chk.value);
+        } else {
+          selectedDealerCompanies.delete(chk.value);
+        }
+        updateDealerCompaniesState();
+      });
+    });
+  }
+
+  function resetDealerCompaniesDropdown() {
+    selectedDealerCompanies.clear();
+    isDealerOtherActive = false;
+    const otherChk = $("dealerCompanyOtherCheckbox");
+    if (otherChk) otherChk.checked = false;
+    const otherCont = $("dealerOtherInputContainer");
+    if (otherCont) otherCont.classList.add("hidden");
+    const otherInput = $("dealerOtherCompaniesInput");
+    if (otherInput) otherInput.value = "";
+    const searchInput = $("dealerCompanySearchInput");
+    if (searchInput) searchInput.value = "";
+    const menu = $("dealerCompaniesMenu");
+    if (menu) menu.classList.add("hidden");
+    const chev = $("dealerCompaniesChevron");
+    if (chev) chev.textContent = "▾";
+    $("dealerRegisteredCompaniesList")?.querySelectorAll(".dealer-company-row")?.forEach((row) => {
+      row.style.display = "";
+    });
+    updateDealerCompaniesState();
+  }
+
+  function setupDealerCompaniesDropdown() {
+    const dropdownBtn = $("dealerCompaniesDropdownBtn");
+    const dropdownMenu = $("dealerCompaniesMenu");
+    const chev = $("dealerCompaniesChevron");
+    const otherCheckbox = $("dealerCompanyOtherCheckbox");
+    const otherContainer = $("dealerOtherInputContainer");
+    const otherInput = $("dealerOtherCompaniesInput");
+    const searchInput = $("dealerCompanySearchInput");
+
+    dropdownBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!dropdownMenu) return;
+      const isClosed = dropdownMenu.classList.toggle("hidden");
+      if (chev) chev.textContent = isClosed ? "▾" : "▴";
+      if (!isClosed && searchInput) {
+        searchInput.focus();
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (dropdownMenu && !dropdownMenu.classList.contains("hidden")) {
+        const wrapper = $("dealerCompaniesDropdownWrapper");
+        if (wrapper && !wrapper.contains(e.target)) {
+          dropdownMenu.classList.add("hidden");
+          if (chev) chev.textContent = "▾";
+        }
+      }
+    });
+
+    searchInput?.addEventListener("input", () => {
+      const q = searchInput.value.trim().toLowerCase();
+      const rows = $("dealerRegisteredCompaniesList")?.querySelectorAll(".dealer-company-row");
+      rows?.forEach((row) => {
+        const name = (row.getAttribute("data-company-name") || "").toLowerCase();
+        row.style.display = name.includes(q) ? "" : "none";
+      });
+    });
+
+    otherCheckbox?.addEventListener("change", () => {
+      isDealerOtherActive = otherCheckbox.checked;
+      if (isDealerOtherActive) {
+        otherContainer?.classList.remove("hidden");
+        otherInput?.focus();
+      } else {
+        otherContainer?.classList.add("hidden");
+        if (otherInput) otherInput.value = "";
+      }
+      updateDealerCompaniesState();
+    });
+
+    otherInput?.addEventListener("input", () => {
+      updateDealerCompaniesState();
+    });
+  }
+  setupDealerCompaniesDropdown();
+
   $("branchForm")?.addEventListener("submit", async (event) => {
-    event.preventDefault(); const form = event.currentTarget; const submit = form.querySelector('[type="submit"]');
-    if (submit) submit.disabled = true; if ($("branchFormMessage")) $("branchFormMessage").textContent = "Saving franchise branch…";
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('[type="submit"]');
+    if (submit) submit.disabled = true;
+    if ($("branchFormMessage")) $("branchFormMessage").textContent = "Saving franchise branch…";
     const payload = Object.fromEntries(new FormData(form).entries());
     try {
       const created = role === "admin"
@@ -9236,10 +9452,14 @@ function initEvents() {
         renderCompanyBranches();
       }
       form.reset();
+      resetDealerCompaniesDropdown();
       $("branchDialog")?.close();
       showToast(`${created.branch_name} added. Franchise setup link sent to ${created.email}.`, "success");
-    } catch (error) { if ($("branchFormMessage")) $("branchFormMessage").textContent = error.message; }
-    finally { if (submit) submit.disabled = false; }
+    } catch (error) {
+      if ($("branchFormMessage")) $("branchFormMessage").textContent = error.message;
+    } finally {
+      if (submit) submit.disabled = false;
+    }
   });
 
   $("companyApplianceForm")?.addEventListener("submit", async (event) => {

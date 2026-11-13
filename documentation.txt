@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.0.3 (Production Release - Admin Franchise Dealer Onboarding, Brand Partnerships Catalog & Customer Route Preference Flow)
-Last Updated: November 8, 2026 (17:35 IST)
+Version: 2.0.4 (Production Release - Admin Multi-Select Registered & Unregistered Brand Dropdown in Branch Onboarding Modal)
+Last Updated: November 13, 2026 (16:38 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -332,6 +332,7 @@ All database entities are defined in `backend/app/db/models.py`:
 
 6. `CompanyBranchModel` (`company_branches` table):
    - `id`: String(64), Primary Key.
+   - `company_id`: String(64), ForeignKey("users.id", CASCADE).
    - `company_id`: String(64), ForeignKey("users.id", CASCADE), Nullable: True (Nullable for independent multi-brand dealer franchises).
    - UniqueConstraint("company_id", "email").
    - `branch_name`, `manager_name`, `email`, `mobile`, `address`, `pincode`.
@@ -385,6 +386,7 @@ All database entities are defined in `backend/app/db/models.py`:
 11. `ServiceRequestModel` (`service_requests` table):
     - `id`: String(64), Primary Key (e.g., `SR-7845`).
     - `customer_id`: String(64), ForeignKey("users.id", CASCADE).
+    - `appliance_id`: String(64), ForeignKey("appliances.id", CASCADE).
     - `appliance_id`: String(64), ForeignKey("appliances.id", CASCADE), Nullable: True.
     - `technician_id`: String(64), Nullable: True.
     - `branch_id`, `company_id`: String(64), Nullable: True (Strict brand franchise isolation).
@@ -657,6 +659,7 @@ Request Headers:
   - Body: `{ "is_active": false }`
   - Toggles franchise branch access and revokes active sessions with cascading revocation.
 - `GET /api/admin/directory/{role}`:
+  - Role `"branch"`: Returns comprehensive list of all franchise branches with branch name, address, pincode, parent company name (`company_name`), manager name, mobile, active status, technician count (`technician_count`), job count (`jobs_count`), `created_at`, `password_set`, and `password_set_at`.
   - Role `"branch"`: Returns comprehensive list of all franchise branches with branch name, address, pincode, parent company name (`company_name`), manager name, mobile, active status, technician count (`technician_count`), job count (`jobs_count`), `dealer_companies`, `is_dealer_franchise` (with Local Dealer Hub badge), `created_at`, `password_set`, and `password_set_at`.
   - Role `"technician"`: Returns list of all technicians with title/specialty, assigned branch name (`branch_name`), parent company name (`company_name`), mobile, rating, total jobs (`total_jobs`), active status, `created_at`, `password_set`, and `password_set_at`.
   - Role `"customer"`: Returns list of customer users with phone, address, registered appliances count (`appliances_count`), total service requests (`total_requests`), ongoing requests (`ongoing_requests`), completed requests (`completed_requests`), `created_at`, and active status.
@@ -778,6 +781,11 @@ Request Headers:
   - Returns a unified `companies` catalog listing officially listed OEM brands on ServSure alongside all independent brands serviced by local dealer franchises.
   - Used by customer complaint registration to present nearby dealer shop options and brand partnerships before service booking.
 - `POST /api/requests`:
+  - Body: `{ "appliance_id": "app_1", "issue": "Water leaking", "preferred_date": "2026-10-25", "preferred_slot": "10:00 AM - 12:00 PM", "address": "...", "pincode": "...", "latitude": 28.4744, "longitude": 77.5040 }`
+  - Strict Brand Isolation & Routing: Automatically invokes `find_nearest_brand_branch()`. Strictly assigns to the closest authorized franchise of that brand.
+  - If brand has no registered branch: leaves `branch_id = null`, ticket goes to Brand OEM queue for manual dispatch.
+  - Outstation Detection: If nearest branch is > 25.0 km away, sets `is_outstation = true`, `slot_applicable = false`, `distance_km = ...`, and `appointment_slot = "Flexible / Outstation Visit"`.
+  - Validates preferred slot capacity and same-day lead time cutoff only when `slot_applicable == true`.
   - Body:
     ```json
     {
@@ -2362,9 +2370,19 @@ were identified between the initial rough draft documentation and the actual cod
         - `frontend/js/dashboard.js`:
           - Implemented `loadBookingDealers()`, `renderNearbyDealersList()`, `populateDealerBrandsDropdown()`, and `setupBookingRoutePreference()`.
           - Wired address changes (mode switch, PIN entry, GPS detection) to refresh nearby dealers dynamically.
-          - Removed hard block requiring appliances prior to opening booking modal; defaults to franchise route when user has no registered appliances.
-          - Updated `submitBooking()` to dispatch franchise payloads with `branch_id`, `dealer_shop_name`, `brand`, and `appliance_name`.
-          - Updated `populateTracking()` and request tables to display `🏪 <Local Dealer Shop Name>` and franchise routing tags.
+      5. Admin Portal Multi-Select Dropdown for Branch Represented Companies (v2.0.4):
+         - Problem: In `admin-dashboard.html` and `ops-dashboard.html`, the branch dialog had an obsolete duplicate modal and a plain text input/textarea for represented companies (`dealer_companies`), making it difficult to select officially onboarded platform companies or specify unregistered ones.
+         - Modal Cleanup: Removed the redundant first `<dialog id="branchDialog">` from both `admin-dashboard.html` and `ops-dashboard.html`.
+         - Multi-Select Dropdown Component (`#dealerCompaniesContainer`):
+           - Dropdown Trigger Button (`#dealerCompaniesDropdownBtn`): Displays selection status, brand counts, or placeholder "Select represented companies…".
+           - Search Filter (`#dealerCompanySearchInput`): Allows quick real-time searching through registered brands.
+           - Registered Companies List (`#dealerRegisteredCompaniesList`): Dynamically lists all platform-registered brand companies (`companies` / `GET /api/admin/companies`) with custom checkboxes and "Registered" tags.
+           - "Other (Not registered with us)" Option (`#dealerCompanyOtherCheckbox`): When selected, opens a custom entry field (`#dealerOtherCompaniesInput`) allowing the admin to enter comma-separated brand names not officially onboarded on the platform.
+           - Selected Badges / Chips (`#dealerSelectedChips`): Renders dismissible chips (`✕`) for active brands with automatic state synchronization.
+           - Form Payload Compilation: Automatically compiles all selected registered brands and custom unregistered brands into `#branchDealerCompanies` (`name="dealer_companies"`), sent to `POST /api/admin/branches`.
+         - Frontend Scripting & Styling:
+           - In `ops-dashboard.js`: Implemented `populateDealerCompaniesDropdown()`, `updateDealerCompaniesState()`, `resetDealerCompaniesDropdown()`, and `setupDealerCompaniesDropdown()`. Fixed duplicate variable declarations in `branchForm` submission.
+           - In `ops-dashboard.css`: Ensured `.company-dialog input[type="checkbox"]` avoids full-width stretching (`width: auto !important`), and added chip and dropdown menu styling.
 
 ==================================================
 End of Documentation

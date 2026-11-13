@@ -3,3 +3,9 @@
 .company-inline-add{height:29px;padding:0 10px;font-size:9px;white-space:nowrap}.company-inline-add span{font-size:13px}
 .company-password-state{font-size:8px!important;margin-top:4px!important}.company-password-state.is-set{color:#329568!important}.company-password-state.is-pending{color:#c78431!important}
 .status-pill.disputed{background:#fef2f2!important;color:#dc2626!important;border:1px solid #fecaca!important;font-weight:700!important}
+.company-dialog input[type="checkbox"]{width:auto!important;margin:0!important;display:inline-block!important;cursor:pointer;accent-color:var(--blue,#176fce)}
+.dealer-companies-field{margin:12px 0}
+.dealer-companies-field label{margin:0 0 6px 0!important}
+.dealer-chip{display:inline-flex;align-items:center;gap:5px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:9999px;padding:2px 8px;font-size:11px;font-weight:600}
+.dealer-chip button{background:none;border:none;color:#60a5fa;cursor:pointer;padding:0;display:inline-flex;align-items:center;font-size:12px;line-height:1}
+.dealer-chip button:hover{color:#1d4ed8}

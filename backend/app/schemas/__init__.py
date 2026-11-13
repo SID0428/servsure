@@ -313,6 +313,7 @@ class ServiceRequestDetail(BaseModel):
     branch_name: Optional[str] = None
 
 class ServiceBookingCreate(BaseModel):
+    appliance_id: str
     appliance_id: Optional[str] = None
     issue: str
     description: Optional[str] = None

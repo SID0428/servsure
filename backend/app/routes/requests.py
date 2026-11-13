@@ -954,6 +954,8 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
     if user.role != "customer":
         raise HTTPException(status_code=403, detail="Only customers can create service requests")
 
+    appliance = db.query(ApplianceModel).filter(ApplianceModel.id == payload.appliance_id).first()
+    app_brand = appliance.brand if appliance else "Authorized Brand"
     route_pref = (payload.service_route_preference or "company").strip().lower()
     chosen_dealer_shop_name = None
 
@@ -1043,6 +1045,13 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
         if default_company:
             company_id = default_company.id
 
+    # Extract pincode from payload or address
+    pincode = payload.pincode.strip() if payload.pincode else None
+    addr_to_check = payload.address or user.address or ""
+    if not pincode and addr_to_check:
+        pin_match = re.search(r"\b(\d{6})\b", addr_to_check)
+        if pin_match:
+            pincode = pin_match.group(1)
     # Strict Brand Franchise Isolation OR Local Dealer Franchise routing
     if route_pref == "franchise" and payload.branch_id:
         matched_branch = db.query(CompanyBranchModel).filter(CompanyBranchModel.id == payload.branch_id).first()
@@ -1126,6 +1135,7 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
             "id": "step_2",
             "title": "Technician Assignment",
             "timestamp": None,
+            "description": "Awaiting assignment by local franchise" if branch_id else "Awaiting brand central dispatch",
             "description": step2_desc,
             "state": "pending"
         },
