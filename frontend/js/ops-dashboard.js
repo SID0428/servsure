@@ -6376,17 +6376,14 @@ function renderAdminBranches() {
   setHidden("addBranchButton", false);
   $("requestSearch").placeholder = "Search branches by name, manager, parent company, or address";
   $("tableTitle").textContent = "Branches";
-  $("tableSubtitle").textContent = "Authorized franchise branch service hubs across all partner brands.";
   $("tableSubtitle").textContent = "Authorized franchise branch service hubs and local dealer shops across partner brands.";
   $("sidePanelTitle").textContent = "Branch network";
   $("healthContent").innerHTML = `<div class="section-empty"><strong>${directoryRows.length}</strong> active franchise branches</div>`;
-  $("activityContent").innerHTML = `<div class="section-empty">Each branch is linked to an authorized brand partner with its dedicated technician roster.</div>`;
   $("activityContent").innerHTML = `<div class="section-empty">Each branch is linked to an authorized brand partner or operates as a multi-brand dealer hub.</div>`;
   $("requestHead").innerHTML = ["Branch & Manager", "Parent Company", "Contact Information", "Created On", "Password Set", "Staff & Workload", "Status", "Action"].map((label) => `<th>${label}</th>`).join("");
 
   const query = ($("requestSearch")?.value || "").trim().toLowerCase();
   const filtered = directoryRows.filter((item) =>
-    [item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode]
     [item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode, item.dealer_companies]
       .join(" ")
       .toLowerCase()
@@ -6410,8 +6407,6 @@ function renderAdminBranches() {
         return `
         <tr>
           <td>
-            <strong class="text-slate-900 block font-bold">${safe(b.branch_name || b.name)}</strong>
-            <small class="text-slate-500">👤 Manager: ${safe((b.manager_name && b.manager_name !== "—") ? b.manager_name : "Not assigned")}</small>
             <div class="flex items-center gap-1.5 flex-wrap">
               <strong class="text-slate-900 block font-bold">${safe(b.branch_name || b.name)}</strong>
               ${isDealer ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">🏪 Local Dealer Hub</span>' : ''}
@@ -6420,7 +6415,6 @@ function renderAdminBranches() {
             ${b.dealer_companies ? `<small class="text-[10px] text-blue-600 block mt-0.5 font-medium">🏷️ Brands: ${safe(b.dealer_companies)}</small>` : ''}
           </td>
           <td>
-            <span class="inline-flex items-center gap-1 font-semibold text-slate-800">🏢 ${safe(b.company_name || "ServSure Partner")}</span>
             <span class="inline-flex items-center gap-1 font-semibold text-slate-800">${isDealer ? '🏪 Multi-Brand Local Dealer' : `🏢 ${safe(b.company_name || "ServSure Partner")}`}</span>
           </td>
           <td>

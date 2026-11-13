@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.0.5 (Production Release - Automated Customer Email Dispatch for Warranty Registration Approval & Rejection)
-Last Updated: November 13, 2026 (17:35 IST)
+Version: 2.0.6 (Production Release - Admin Branch Search Filter & Directory Rendering Bug Fix)
+Last Updated: November 13, 2026 (23:10 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -2392,6 +2392,16 @@ were identified between the initial rough draft documentation and the actual cod
              - Dispatches via `send_notification_email` to safely support Brevo SMTP production delivery while falling back to simulated mode in offline/development setups, recording audit logs in `NotificationLogModel`.
            - In `backend/app/routes/warranty_amc.py`:
              - Integrated both dispatchers directly into `verify_warranty_registration()`, executing immediately after `db.commit()` and `db.refresh(app)`.
+
+       7. Admin Branch Search Filter & Directory Rendering Bug Fix (v2.0.6):
+          - Problem: When submitting the branch creation modal (`#branchForm`) from the Admin Portal, an error dialog / alert appeared stating:
+            `undefined is not an object (evaluating '[item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode] [item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode, item.dealer_companies] .join')`.
+            This error occurred because after the backend API `POST /api/admin/branches` successfully returned the created branch record, the frontend callback invoked `directoryRows.push(created); renderAdminBranches();`.
+          - Root Cause:
+            In `frontend/js/ops-dashboard.js` inside `renderAdminBranches()`, an earlier edit had left an unclosed array literal `[item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode]` immediately before `[item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode, item.dealer_companies].join(" ")`. In JavaScript, `arr1[arr2]` is evaluated as bracket notation property access where `arr2` is coerced to a string. Because the array does not have that string property, it evaluated to `undefined`, causing `undefined.join(" ")` to throw a TypeError. This exception was caught by `branchForm`'s `catch (error)` block, which displayed the raw message in `#branchFormMessage` and prevented the modal dialog from closing.
+          - Resolution:
+            - In `frontend/js/ops-dashboard.js`: Cleaned up `renderAdminBranches()` to remove the redundant unclosed array literal and removed duplicate inner element mutations. The search filter string now correctly joins all branch fields including `item.dealer_companies` seamlessly.
+            - Modal closing (`branchDialog.close()`) and directory list updates now execute cleanly without errors.
 
 ==================================================
 End of Documentation
