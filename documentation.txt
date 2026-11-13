@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.0.4 (Production Release - Admin Multi-Select Registered & Unregistered Brand Dropdown in Branch Onboarding Modal)
-Last Updated: November 13, 2026 (16:38 IST)
+Version: 2.0.5 (Production Release - Automated Customer Email Dispatch for Warranty Registration Approval & Rejection)
+Last Updated: November 13, 2026 (17:35 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -912,8 +912,8 @@ Request Headers:
 - `POST /api/warranty-amc/registrations/{appliance_id}/verify`:
   - Body: `{ "action": "approve" | "reject", "warranty_months": 24, "rejection_reason": "...", "notes": "..." }`
   - Brand OEM review endpoint.
-  - Approve action: Resolves fiscal year policy matched by purchase date, freezes immutable `policy_snapshot_json`, sets `warranty_status = "Active"`, overrides warranty months if specified, recalculates `warranty_start_date` and `warranty_end_date` from purchase date, logs `verified_at` and `verified_by`.
-  - Reject action: Sets `warranty_status = "Rejected"`, records `warranty_rejection_reason` for customer visibility, logs `verified_at` and `verified_by`.
+  - Approve action: Resolves fiscal year policy matched by purchase date, freezes immutable `policy_snapshot_json`, sets `warranty_status = "Active"`, overrides warranty months if specified, recalculates `warranty_start_date` and `warranty_end_date` from purchase date, logs `verified_at` and `verified_by`. Automatically dispatches `notify_warranty_registration_approved` email to the customer with verified certificate details (coverage dates, duration, model, and active terms).
+  - Reject action: Sets `warranty_status = "Rejected"`, records `warranty_rejection_reason` for customer visibility, logs `verified_at` and `verified_by`. Automatically dispatches `notify_warranty_registration_rejected` email to the customer with the company's rejection reason and guidance for uploading clear proof of purchase.
 - `GET /api/warranty-amc/policies`:
   - Query: `?category=...&is_active=true`
   - Returns company's configured fiscal-year warranty policies with effective date windows and component warranty rules.
@@ -2383,6 +2383,15 @@ were identified between the initial rough draft documentation and the actual cod
          - Frontend Scripting & Styling:
            - In `ops-dashboard.js`: Implemented `populateDealerCompaniesDropdown()`, `updateDealerCompaniesState()`, `resetDealerCompaniesDropdown()`, and `setupDealerCompaniesDropdown()`. Fixed duplicate variable declarations in `branchForm` submission.
            - In `ops-dashboard.css`: Ensured `.company-dialog input[type="checkbox"]` avoids full-width stretching (`width: auto !important`), and added chip and dropdown menu styling.
+      6. Automated Customer Email Dispatch for Warranty Registration Approval & Rejection (v2.0.5):
+         - Problem: When brand OEM administrators verified customer appliance warranty registrations in the Audit Warranty modal (`POST /api/warranty-amc/registrations/{appliance_id}/verify`), the platform updated the appliance database status but did not inform the customer via email whether their warranty was approved or rejected.
+         - Backend Implementation:
+           - In `backend/app/notification_service.py`:
+             - Added `notify_warranty_registration_approved(app: ApplianceModel, company_name: str, db: Session)`: Resolves the customer's account (`UserModel`), extracts appliance and model information, and dispatches a comprehensive email containing the active warranty certificate, validity period, coverage start/end dates, matched policy, and direct link to the Customer Portal.
+             - Added `notify_warranty_registration_rejected(app: ApplianceModel, company_name: str, rejection_reason: str, db: Session)`: Resolves the customer's account, extracts the reviewing company name and exact rejection reason (e.g. illegible invoice, purchase date mismatch), and dispatches an informative email with troubleshooting instructions and steps to re-upload clear proof of purchase on the Customer Portal.
+             - Dispatches via `send_notification_email` to safely support Brevo SMTP production delivery while falling back to simulated mode in offline/development setups, recording audit logs in `NotificationLogModel`.
+           - In `backend/app/routes/warranty_amc.py`:
+             - Integrated both dispatchers directly into `verify_warranty_registration()`, executing immediately after `db.commit()` and `db.refresh(app)`.
 
 ==================================================
 End of Documentation

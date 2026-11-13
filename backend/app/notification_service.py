@@ -3,7 +3,7 @@ import os
 import uuid
 from datetime import datetime
 from sqlalchemy.orm import Session
-from app.db.models import NotificationLogModel, UserModel, TechnicianModel, ServiceRequestModel
+from app.db.models import NotificationLogModel, UserModel, TechnicianModel, ServiceRequestModel, ApplianceModel
 from app.email_service import send_brevo_email
 
 logger = logging.getLogger("notifications")
@@ -438,3 +438,221 @@ Thank you for your patience with ServSure.
 ServSure Support Team
 """
     send_notification_email(to_email, to_name, subject, text, None, "escalation_resolved", req.id, req.customer_id, db)
+
+
+def notify_warranty_registration_approved(app: ApplianceModel, company_name: str, db: Session):
+    customer = db.query(UserModel).filter(UserModel.id == app.user_id).first()
+    to_email = customer.email if customer else "customer@servsure.com"
+    to_name = customer.name if (customer and customer.name) else "Valued Customer"
+    appliance_desc = (app.appliance_name or f"{app.brand} {app.category}").strip()
+    brand_name = app.brand or company_name or "Authorized Brand"
+    policy_name = app.matched_policy_name or "Standard Manufacturer Warranty"
+    w_months = app.warranty_months or 12
+    serial_info = f" · Serial No: {app.serial_no}" if getattr(app, "serial_no", None) else ""
+    subject = f"✓ Warranty Approved: {brand_name} {appliance_desc} · ServSure"
+
+    text = f"""Hello {to_name},
+
+Great news! Your warranty registration for your {brand_name} {appliance_desc} has been officially verified and approved by {company_name}.
+
+Approved Warranty Details:
+- Appliance: {appliance_desc} ({app.model_no}){serial_info}
+- Category: {app.category}
+- Brand: {brand_name}
+- Purchase Date: {app.purchase_date or 'On file'}
+- Warranty Status: Active (Official OEM Coverage)
+- Warranty Duration: {w_months} Months Comprehensive Coverage
+- Coverage Start Date: {app.warranty_start_date or 'Registration Date'}
+- Coverage End Date: {app.warranty_end_date or 'N/A'}
+- Matched Warranty Policy: {policy_name}
+- Verified By: {company_name}
+
+Your appliance is now protected under official OEM warranty. You can book doorstep visits, track service requests, and view full component warranty terms anytime on your ServSure Customer Portal:
+https://servsure.vercel.app/customer-dashboard.html
+
+Best regards,
+{company_name} & ServSure Service Network
+"""
+
+    html = f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff;">
+        <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #16a34a; padding-bottom: 14px; margin-bottom: 20px;">
+            <div>
+                <h2 style="color: #0f172a; margin: 0; font-size: 20px;">Warranty Registration Approved</h2>
+                <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">Official Manufacturer Coverage Verified</p>
+            </div>
+            <span style="background: #ecfdf5; color: #16a34a; border: 1px solid #bbf7d0; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 9999px;">✓ ACTIVE WARRANTY</span>
+        </div>
+
+        <p style="font-size: 15px; color: #334155; margin: 0 0 14px 0;">Hello <strong>{to_name}</strong>,</p>
+        <p style="font-size: 14px; color: #475569; line-height: 1.5; margin: 0 0 18px 0;">
+            Great news! <strong>{company_name}</strong> has reviewed and approved your warranty registration proof for your <strong>{brand_name} {appliance_desc}</strong>. Your appliance is now officially covered.
+        </p>
+
+        <!-- Warranty Certificate Card -->
+        <div style="background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%); border: 1px solid #86efac; border-radius: 12px; padding: 18px; margin: 0 0 20px 0;">
+            <table style="width: 100%; font-size: 13px; color: #1e293b; border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b; width: 38%;">Appliance:</td>
+                    <td style="font-weight: 700; color: #0f172a;">{appliance_desc}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b;">Model & Serial:</td>
+                    <td>{app.model_no}{f" (SN: {app.serial_no})" if getattr(app, "serial_no", None) else ""}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b;">Brand / Category:</td>
+                    <td>{brand_name} · {app.category}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b;">Purchase Date:</td>
+                    <td>{app.purchase_date or 'Verified on file'}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #16a34a; font-weight: 600;">Warranty Validity:</td>
+                    <td style="font-weight: 700; color: #16a34a;">{w_months} Months Comprehensive</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b;">Coverage Period:</td>
+                    <td style="font-weight: 600;">{app.warranty_start_date or 'Now'} &nbsp;→&nbsp; {app.warranty_end_date or 'N/A'}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b;">OEM Policy:</td>
+                    <td>{policy_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b;">Verified By:</td>
+                    <td><strong>{company_name}</strong></td>
+                </tr>
+            </table>
+        </div>
+
+        <div style="background-color: #f8fafc; border-radius: 10px; padding: 14px 16px; margin: 0 0 20px 0; font-size: 12px; color: #64748b; line-height: 1.5;">
+            🛡️ <strong>What this means:</strong> Whenever you request doorstep repairs or maintenance through ServSure, covered OEM parts and labor will be subsidized according to your manufacturer's active policy terms.
+        </div>
+
+        <div style="text-align: center; margin: 24px 0 10px 0;">
+            <a href="https://servsure.vercel.app/customer-dashboard.html" style="display: inline-block; background: #16a34a; color: #ffffff; text-decoration: none; font-size: 13px; font-weight: 700; padding: 10px 24px; border-radius: 8px;">View Appliance in Portal →</a>
+        </div>
+    </div>
+    """
+
+    send_notification_email(
+        to_email=to_email,
+        to_name=to_name,
+        subject=subject,
+        text_content=text,
+        html_content=html,
+        event_type="warranty_registration_approved",
+        reference_id=app.id,
+        user_id=app.user_id,
+        db=db
+    )
+
+
+def notify_warranty_registration_rejected(app: ApplianceModel, company_name: str, rejection_reason: str, db: Session):
+    customer = db.query(UserModel).filter(UserModel.id == app.user_id).first()
+    to_email = customer.email if customer else "customer@servsure.com"
+    to_name = customer.name if (customer and customer.name) else "Valued Customer"
+    appliance_desc = (app.appliance_name or f"{app.brand} {app.category}").strip()
+    brand_name = app.brand or company_name or "Brand"
+    reason_clean = (rejection_reason or "Invoice verification failed (illegible document or mismatched serial/model)").strip()
+    subject = f"Action Required: Warranty Registration Update for {brand_name} {appliance_desc} · ServSure"
+
+    text = f"""Hello {to_name},
+
+Thank you for registering your {brand_name} {appliance_desc} (Model: {app.model_no}) on ServSure.
+
+During document audit, {company_name} could not approve your warranty registration at this time.
+
+Rejection Details:
+- Appliance: {appliance_desc} ({app.model_no})
+- Category: {app.category}
+- Brand: {brand_name}
+- Status: Rejected / Verification Declined
+- Reason from {company_name}: {reason_clean}
+- Reviewed By: {company_name}
+
+What You Can Do Next:
+1. Double-check your invoice or tax bill to ensure the appliance brand, model number, and purchase date are clearly legible.
+2. Log into your ServSure Customer Dashboard:
+   https://servsure.vercel.app/customer-dashboard.html
+3. You can edit your appliance registration or re-upload a clear copy of your invoice or proof of purchase.
+4. If you believe this is in error, contact {company_name} customer support or reply to this email for assistance.
+
+Best regards,
+{company_name} & ServSure Customer Support
+"""
+
+    html = f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff;">
+        <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #ef4444; padding-bottom: 14px; margin-bottom: 20px;">
+            <div>
+                <h2 style="color: #0f172a; margin: 0; font-size: 20px;">Warranty Registration Update</h2>
+                <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">Invoice Verification Declined</p>
+            </div>
+            <span style="background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 9999px;">DECLINED</span>
+        </div>
+
+        <p style="font-size: 15px; color: #334155; margin: 0 0 14px 0;">Hello <strong>{to_name}</strong>,</p>
+        <p style="font-size: 14px; color: #475569; line-height: 1.5; margin: 0 0 18px 0;">
+            Thank you for registering your <strong>{brand_name} {appliance_desc}</strong> on ServSure. The verification team at <strong>{company_name}</strong> has audited your submitted proof of purchase but was unable to validate the warranty registration at this time.
+        </p>
+
+        <!-- Rejection Summary Card -->
+        <div style="background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 18px; margin: 0 0 20px 0;">
+            <table style="width: 100%; font-size: 13px; color: #1e293b; border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b; width: 38%;">Appliance:</td>
+                    <td style="font-weight: 700; color: #0f172a;">{appliance_desc}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b;">Model Number:</td>
+                    <td>{app.model_no}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b;">Brand / Category:</td>
+                    <td>{brand_name} · {app.category}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #ef4444; font-weight: 600;">Verification Status:</td>
+                    <td style="font-weight: 700; color: #ef4444;">Declined / Rejected</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #991b1b; font-weight: 600; vertical-align: top;">Rejection Reason:</td>
+                    <td style="font-weight: 600; color: #991b1b; line-height: 1.4;">{reason_clean}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b;">Reviewed By:</td>
+                    <td><strong>{company_name}</strong></td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- Next Steps Card -->
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin: 0 0 20px 0;">
+            <p style="font-size: 13px; font-weight: 700; color: #0f172a; margin: 0 0 8px 0;">📋 How to resolve this:</p>
+            <ul style="font-size: 12px; color: #475569; margin: 0; padding-left: 20px; line-height: 1.6;">
+                <li>Ensure your invoice clearly shows the seller name, date of purchase, brand, and exact model number.</li>
+                <li>Make sure the uploaded photo or PDF document is bright, clear, and unblurred.</li>
+                <li>Log in to your customer portal to re-upload an updated proof of purchase.</li>
+            </ul>
+        </div>
+
+        <div style="text-align: center; margin: 24px 0 10px 0;">
+            <a href="https://servsure.vercel.app/customer-dashboard.html" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; font-size: 13px; font-weight: 700; padding: 10px 24px; border-radius: 8px;">Open Customer Dashboard →</a>
+        </div>
+    </div>
+    """
+
+    send_notification_email(
+        to_email=to_email,
+        to_name=to_name,
+        subject=subject,
+        text_content=text,
+        html_content=html,
+        event_type="warranty_registration_rejected",
+        reference_id=app.id,
+        user_id=app.user_id,
+        db=db
+    )

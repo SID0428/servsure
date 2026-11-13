@@ -21,6 +21,10 @@ from app.schemas import (
     CompanyWarrantyPolicyResponse
 )
 from app.security import get_authenticated_user
+from app.notification_service import (
+    notify_warranty_registration_approved,
+    notify_warranty_registration_rejected
+)
 
 router = APIRouter(prefix="/api/warranty-amc", tags=["warranty-amc"])
 
@@ -908,6 +912,18 @@ def verify_warranty_registration(
 
     db.commit()
     db.refresh(app)
+
+    company_name = user.name or app.brand or "Authorized Manufacturer"
+    if payload.action == "approve":
+        try:
+            notify_warranty_registration_approved(app, company_name, db)
+        except Exception:
+            pass
+    elif payload.action == "reject":
+        try:
+            notify_warranty_registration_rejected(app, company_name, app.warranty_rejection_reason, db)
+        except Exception:
+            pass
 
     return {
         "status": "success",
