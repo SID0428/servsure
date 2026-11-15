@@ -2123,23 +2123,26 @@ async function submitProfileEdit(event) {
 
 function openDialog(id) {
   const dialog = $(id);
-  if (dialog?.showModal) dialog.showModal();
-  else dialog?.classList.remove("hidden");
+  if (!dialog) return;
+  if (dialog.showModal) {
+    if (!dialog.open) dialog.showModal();
+  } else {
+    dialog.classList.remove("hidden");
+  }
 }
 
 function closeDialog(id) {
   if (id === "liveTrackingMapDialog") stopTrackingAnimation();
   const dialog = $(id);
-  if (dialog?.close) dialog.close();
-  else dialog?.classList.add("hidden");
+  if (!dialog) return;
+  if (dialog.close) {
+    if (dialog.open) dialog.close();
+  } else {
+    dialog.classList.add("hidden");
+  }
 }
 
 window.openBookingModal = function (applianceId = "") {
-  if (!userAppliances.length) {
-    showToast("Register an appliance before booking a service visit.");
-    window.openAddApplianceModal();
-    return;
-  }
   if ($("bookingMessage")) $("bookingMessage").textContent = "";
   syncBookingAddress();
 
@@ -2171,6 +2174,7 @@ window.openBookingModal = function (applianceId = "") {
 window.openAddApplianceModal = function () {
   if ($("applianceMessage")) $("applianceMessage").textContent = "";
   if ($("applianceForm")) $("applianceForm").reset();
+  renderCompanyOptions();
   if ($("newAppPurchaseDate")) {
     const todayStr = new Date().toISOString().split("T")[0];
     $("newAppPurchaseDate").max = todayStr;
@@ -3734,6 +3738,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     $("cancelAppliance").addEventListener("click", () =>
       closeDialog("applianceDialog")
     );
+
+  // Close dialog on backdrop click
+  document.querySelectorAll("dialog").forEach((d) => {
+    d.addEventListener("click", (e) => {
+      if (e.target === d) closeDialog(d.id);
+    });
+  });
 
   // Cascading appliance catalog & invoice upload listeners
   if ($("newAppCompany")) {

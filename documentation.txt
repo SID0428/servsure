@@ -5,7 +5,7 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 File: documentation.txt
 Platform: ServSure (formerly Servora)
 Version: 2.0.7 (Production Release - Customer Dashboard Scripting Syntax & Modal Redundancy Bug Fix)
-Last Updated: November 15, 2026 (22:15 IST)
+Last Updated: November 15, 2026 (22:30 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -2404,17 +2404,22 @@ were identified between the initial rough draft documentation and the actual cod
             - Modal closing (`branchDialog.close()`) and directory list updates now execute cleanly without errors.
 
        8. Customer Dashboard Scripting Syntax & Modal Redundancy Bug Fix (v2.0.7):
-          - Problem: The customer portal (`frontend/customer-dashboard.html`) failed to load data. The header greeted the customer ("Hello <Name> 👋") from synchronous cached hydration, but all main sections remained stuck indefinitely on "Loading appliances…", "Loading active requests…", and "Service Tracking: —" with counts remaining at 0.
+          - Problem: The customer portal (`frontend/customer-dashboard.html`) failed to load data. The header greeted the customer ("Hello <Name> 👋") from synchronous cached hydration, but all main sections remained stuck indefinitely on "Loading appliances…", "Loading active requests…", and "Service Tracking: —" with counts remaining at 0. Furthermore, clicking on "Book a service" or "+ Add Appliance" caused the entire screen to lock up / freeze.
           - Root Cause:
-            In commit `afc1f215`, an overlapping merge patch in `frontend/js/dashboard.js` introduced a fatal JavaScript syntax error:
-            1. Inside `setupAddressModes()`, an unclosed duplicate line `["bookNewHouse", "bookNewCity", "bookNewPincode"].forEach((id) => {` was prepended without a closing parenthesis/brace, wrapping subsequent functions in its block scope.
-            2. Inside `populateTracking()`, `$("trackingMeta").textContent` had a corrupted duplicate snippet ending with `)}${request.appointment_slot ? ...}${dealerBadge}\`;`, causing an unclosed parenthesis to pair across 350 lines and throwing `SyntaxError: missing ) after argument list` immediately at ES module evaluation time.
-            3. Because `dashboard.js` failed at parse time, the browser aborted execution of the module entirely. Consequently, `DOMContentLoaded` listeners, `loadCurrentCustomer()`, `loadDashboardData()`, and all dynamic API fetches (`/api/appliances`, `/api/requests`, `/api/appliances/companies`) never executed.
-            4. In addition, `frontend/customer-dashboard.html` had duplicate booking modal form fields (`#bookApplianceSelect`, `#bookIssue`, `#bookDate`, `#bookSlot`, `#bookingMiniMap`, and `#bookingSubmit`) pasted into `#bookingDialog`.
+            1. In `frontend/js/dashboard.js`, an overlapping merge patch introduced a fatal JavaScript syntax error: inside `setupAddressModes()`, an unclosed duplicate line `["bookNewHouse", "bookNewCity", "bookNewPincode"].forEach((id) => {` was prepended without a closing bracket, and inside `populateTracking()`, `$("trackingMeta").textContent` had a corrupted duplicate snippet ending with `)}${request.appointment_slot ? ...}${dealerBadge}\`;`. This threw `SyntaxError: missing ) after argument list` at ES module evaluation time, terminating all script execution so dynamic API data never loaded.
+            2. In `frontend/customer-dashboard.html`, a leftover unclosed opening block `<dialog id="bookingDialog" class="w-[min(94vw,540px)]..."><form id="bookingForm"...>` existed right above the actual `<dialog id="bookingDialog">`. When `document.getElementById("bookingDialog")` was opened, the browser opened the outer empty shell whose dark backdrop (`dialog::backdrop`) covered the entire screen. Because the inner dialog and its close buttons were never opened, the backdrop blocked all page interactions and froze the UI.
+            3. In `frontend/js/dashboard.js`, `openBookingModal` contained an erroneous guard redirecting users with 0 appliances away from the booking modal to `openAddApplianceModal()`, preventing users from accessing the Address-First Local Dealer & Franchise booking route. Additionally, calling `.showModal()` on an already-open dialog without checking `.open` risked throwing `InvalidStateError`.
           - Resolution:
-            - In `frontend/js/dashboard.js`: Removed the duplicate unclosed `forEach` in `setupAddressModes()`, fixed the corrupted `trackingMeta` template string line in `populateTracking()`, removed duplicate `<td>` in `renderRequests()`, deduplicated body payloads and button states in `submitBooking()`, and eliminated duplicate comments.
-            - In `frontend/customer-dashboard.html`: Cleaned up `#bookingDialog`, removing duplicate appliance selectors, issue fields, slot banners, duplicate GPS map containers, and redundant submit buttons.
-            - Verified module parse via Node.js VM `SourceTextModule` and validated syntax via `node --check frontend/js/dashboard.js`.
+            - In `frontend/js/dashboard.js`:
+              - Removed the duplicate unclosed `forEach` in `setupAddressModes()`, fixed the corrupted `trackingMeta` template string line in `populateTracking()`, removed duplicate `<td>` in `renderRequests()`, and deduplicated body payloads and button states in `submitBooking()`.
+              - Protected `openDialog()` and `closeDialog()` by validating `!dialog.open` and `dialog.open` before invoking `.showModal()` or `.close()`.
+              - Removed the 0-appliance blocker in `openBookingModal()` so customers without registered appliances can book doorstep service with local dealer franchises as designed.
+              - Ensured `openAddApplianceModal()` invokes `renderCompanyOptions()` so company catalog dropdowns are always fresh.
+              - Attached backdrop click-to-close event listeners to all modal dialogs.
+            - In `frontend/customer-dashboard.html`:
+              - Removed the nested outer duplicate `<dialog id="bookingDialog">` and `<form id="bookingForm">` lines, bringing open and close dialog/form tags to a clean 16:16 and 9:9 balance.
+              - Cleaned up duplicated fields, slot banners, and duplicate GPS map containers.
+            - Verification: Validated module parsing via Node.js VM `SourceTextModule`, syntax checked all frontend JS via `node --check`, and confirmed 1:1 dialog/form tag matching.
 
 ==================================================
 End of Documentation
