@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.0.6 (Production Release - Admin Branch Search Filter & Directory Rendering Bug Fix)
-Last Updated: November 13, 2026 (23:10 IST)
+Version: 2.0.7 (Production Release - Customer Dashboard Scripting Syntax & Modal Redundancy Bug Fix)
+Last Updated: November 15, 2026 (22:15 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -2402,6 +2402,19 @@ were identified between the initial rough draft documentation and the actual cod
           - Resolution:
             - In `frontend/js/ops-dashboard.js`: Cleaned up `renderAdminBranches()` to remove the redundant unclosed array literal and removed duplicate inner element mutations. The search filter string now correctly joins all branch fields including `item.dealer_companies` seamlessly.
             - Modal closing (`branchDialog.close()`) and directory list updates now execute cleanly without errors.
+
+       8. Customer Dashboard Scripting Syntax & Modal Redundancy Bug Fix (v2.0.7):
+          - Problem: The customer portal (`frontend/customer-dashboard.html`) failed to load data. The header greeted the customer ("Hello <Name> 👋") from synchronous cached hydration, but all main sections remained stuck indefinitely on "Loading appliances…", "Loading active requests…", and "Service Tracking: —" with counts remaining at 0.
+          - Root Cause:
+            In commit `afc1f215`, an overlapping merge patch in `frontend/js/dashboard.js` introduced a fatal JavaScript syntax error:
+            1. Inside `setupAddressModes()`, an unclosed duplicate line `["bookNewHouse", "bookNewCity", "bookNewPincode"].forEach((id) => {` was prepended without a closing parenthesis/brace, wrapping subsequent functions in its block scope.
+            2. Inside `populateTracking()`, `$("trackingMeta").textContent` had a corrupted duplicate snippet ending with `)}${request.appointment_slot ? ...}${dealerBadge}\`;`, causing an unclosed parenthesis to pair across 350 lines and throwing `SyntaxError: missing ) after argument list` immediately at ES module evaluation time.
+            3. Because `dashboard.js` failed at parse time, the browser aborted execution of the module entirely. Consequently, `DOMContentLoaded` listeners, `loadCurrentCustomer()`, `loadDashboardData()`, and all dynamic API fetches (`/api/appliances`, `/api/requests`, `/api/appliances/companies`) never executed.
+            4. In addition, `frontend/customer-dashboard.html` had duplicate booking modal form fields (`#bookApplianceSelect`, `#bookIssue`, `#bookDate`, `#bookSlot`, `#bookingMiniMap`, and `#bookingSubmit`) pasted into `#bookingDialog`.
+          - Resolution:
+            - In `frontend/js/dashboard.js`: Removed the duplicate unclosed `forEach` in `setupAddressModes()`, fixed the corrupted `trackingMeta` template string line in `populateTracking()`, removed duplicate `<td>` in `renderRequests()`, deduplicated body payloads and button states in `submitBooking()`, and eliminated duplicate comments.
+            - In `frontend/customer-dashboard.html`: Cleaned up `#bookingDialog`, removing duplicate appliance selectors, issue fields, slot banners, duplicate GPS map containers, and redundant submit buttons.
+            - Verified module parse via Node.js VM `SourceTextModule` and validated syntax via `node --check frontend/js/dashboard.js`.
 
 ==================================================
 End of Documentation

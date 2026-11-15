@@ -1067,9 +1067,6 @@ function renderRequests() {
         .map(
           (request) => `
         <tr class="hover:bg-slate-50/70 transition">
-          <td class="whitespace-nowrap px-5 py-4 font-bold text-[#0066ff] sm:px-6">${escapeHtml(
-            request.id
-          )}</td>
           <td class="whitespace-nowrap px-5 py-4 font-bold text-[#0066ff] sm:px-6">
             ${escapeHtml(request.id)}
             ${request.dealer_shop_name ? `<div class="mt-0.5 text-[10px] font-semibold text-indigo-700">🏪 ${escapeHtml(request.dealer_shop_name)}</div>` : ""}
@@ -1179,7 +1176,6 @@ function setupAddressModes() {
     $("detectGpsBtn").onclick = detectUserGps;
   }
 
-  ["bookNewHouse", "bookNewCity", "bookNewPincode"].forEach((id) => {
   ["bookNewHouse", "bookNewCity"].forEach((id) => {
     if ($(id)) $(id).addEventListener("input", syncBookingAddress);
   });
@@ -1200,7 +1196,6 @@ function syncBookingAddress() {
     const saved = currentUser?.address || "";
     if ($("bookAddress")) $("bookAddress").value = saved;
     const m = saved.match(/\b(\d{6})\b/);
-    if ($("bookPincode")) $("bookPincode").value = m ? m[1] : "";
     if ($("bookPincode")) $("bookPincode").value = m ? m[1] : (currentUser?.pincode || "");
   } else if (currentAddrMode === "new") {
     const house = $("bookNewHouse")?.value.trim() || "";
@@ -1550,7 +1545,6 @@ function populateTracking(request) {
       : (request.service_route_preference === "franchise" && request.branch_name ? ` · 🏪 ${request.branch_name}` : "");
     $("trackingMeta").textContent = `${request.id} · ${formatDate(
       request.appointment_date
-    )}${request.appointment_slot ? ` · ${request.appointment_slot}` : ""}`;
     )}${request.appointment_slot ? ` · ${request.appointment_slot}` : ""}${dealerBadge}`;
   }
   if ($("trackingIssue")) {
@@ -1565,7 +1559,6 @@ function populateTracking(request) {
     $("trackingTechnician").textContent = technician ? technician.name : "Awaiting Technician Assignment";
   }
   if ($("trackingTechTitle")) {
-    $("trackingTechTitle").textContent = technician?.title || "Your service ticket is being reviewed by the nearest franchise";
     const dealerInfo = request.dealer_shop_name || (request.service_route_preference === "franchise" ? request.branch_name : null);
     $("trackingTechTitle").textContent = technician?.title || (dealerInfo ? `Your service ticket is being handled by 🏪 ${dealerInfo}` : "Your service ticket is being reviewed by the nearest franchise");
   }
@@ -2152,8 +2145,6 @@ window.openBookingModal = function (applianceId = "") {
 
   const select = $("bookApplianceSelect");
   if (select && applianceId) select.value = applianceId;
-  if ($("bookingMessage")) $("bookingMessage").textContent = "";
-  syncBookingAddress();
 
   if (userAppliances.length === 0) {
     setBookingRoute("franchise");
@@ -2511,17 +2502,6 @@ async function submitBooking(event) {
     const request = await readApiJson("/api/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        appliance_id: $("bookApplianceSelect").value,
-        issue: $("bookIssue").value.trim(),
-        preferred_date: $("bookDate").value,
-        preferred_slot: $("bookSlot").value,
-        address: address,
-        pincode: pincode,
-        latitude: lat,
-        longitude: lng,
-        defect_photo: $("bookDefectPhoto")?.value || null,
-      }),
       body: JSON.stringify(payload),
     });
     closeDialog("bookingDialog");
@@ -2545,7 +2525,6 @@ async function submitBooking(event) {
     }
   } finally {
     button.disabled = false;
-    button.textContent = "Confirm booking";
     button.textContent = "Confirm & Register Complaint";
   }
 }
@@ -3821,7 +3800,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   if ($("closeAddress")) {
     $("closeAddress").addEventListener("click", () => closeDialog("addressDialog"));
   }
-  // Setup 3 address selection modes
   // Setup address selection modes and booking route preference (Official Company vs Local Franchise)
   setupAddressModes();
   setupBookingRoutePreference();
