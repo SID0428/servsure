@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.0.7 (Production Release - Customer Dashboard Scripting Syntax & Modal Redundancy Bug Fix)
-Last Updated: November 15, 2026 (22:30 IST)
+Version: 2.0.8 (Production Release - Local Dealer Franchise Routing, Address & Registered Products Display Fix)
+Last Updated: November 16, 2026 (00:05 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -2420,6 +2420,32 @@ were identified between the initial rough draft documentation and the actual cod
               - Removed the nested outer duplicate `<dialog id="bookingDialog">` and `<form id="bookingForm">` lines, bringing open and close dialog/form tags to a clean 16:16 and 9:9 balance.
               - Cleaned up duplicated fields, slot banners, and duplicate GPS map containers.
             - Verification: Validated module parsing via Node.js VM `SourceTextModule`, syntax checked all frontend JS via `node --check`, and confirmed 1:1 dialog/form tag matching.
+
+       9. Local Dealer Franchise Routing, Address & Registered Products Display Fix (v2.0.8):
+          - Problem:
+            1. When selecting "Nearby Local Dealer & Franchise" in the service booking modal, the dealer list failed to load with the message: "Unable to load nearby dealer list. You can still enter your brand manually below."
+            2. In the appliance dropdown (`#bookApplianceSelect`), options only displayed the company name, category, and model number (e.g. `gelistra · Other · CLOV6BL`), omitting the actual registered product name (e.g. `Chimney`, `BUILT-IN-MWO / OVEN & OTG`, `Inverter Split AC`).
+            3. Selecting the Local Dealer route concealed registered products, forcing users to manually re-type the appliance name and brand rather than picking from their registered appliances.
+            4. Local dealer cards truncated shop addresses and lacked phone contacts.
+          - Root Causes:
+            1. In `backend/app/routes/requests.py`, `@router.get("/available-slots")` and `@router.get("/booking-dealers")` were declared sequentially AFTER `@router.get("/{request_id}")`. FastAPI / Starlette route matching is evaluated strictly in declaration order. Any GET request to `/api/requests/booking-dealers` was intercepted by `/{request_id}` with `request_id = "booking-dealers"`, attempting to query `ServiceRequestModel` and returning 404/401, causing `readApiJson` to throw.
+            2. The `CompanyBranchModel` table in local SQLite database lacked `dealer_companies` and `is_dealer_franchise` columns, causing SQLAlchemy `.all()` to throw `OperationalError: no such column: dealer_companies`. Additionally, `CompanyBranchModel` had a duplicate `company_id` Column definition.
+            3. In `frontend/js/dashboard.js`, `renderAppliances()` hardcoded the option string as `${appliance.brand} ${appliance.category} · ${appliance.model_no}`, ignoring `appliance.appliance_name` and `getApplianceDisplayName()`.
+            4. The Local Dealer view (`#bookingFranchiseRouteView`) had no registered product selector and dealer cards used `truncate` on `dealer.address`.
+          - Resolutions:
+            - Backend Route Reordering:
+              - In `backend/app/routes/requests.py`: Relocated `@router.get("/{request_id}")` below all static subpath routes (`/available-slots` and `/booking-dealers`). Static routes are now evaluated first and resolve cleanly.
+              - In `backend/app/db/models.py`: Removed duplicate `company_id` column in `CompanyBranchModel`.
+              - Database Schema & Auto-Heal: Executed migration seeds ensuring `dealer_companies` and `is_dealer_franchise` exist in `company_branches`, and added parent company fallback in `get_booking_dealers` for branches linked via `company_id`.
+            - Frontend Enhancements:
+              - In `frontend/js/dashboard.js`:
+                - Updated `renderAppliances()` to format all appliance dropdown options as `${prodName} (${details})` (e.g. `Chimney (gelistra · CLOV6BL)`), placing the product name first and foremost.
+                - Added `#bookFranchiseApplianceSelect` in `bookingFranchiseRouteView` populated with all customer registered products. Selecting a product automatically auto-populates the dealer brand and appliance name fields and links `payload.appliance_id` and `payload.model_no`.
+                - Updated `renderNearbyDealersList()` to display complete dealer addresses with PIN codes and mobile phone numbers (`dealer.mobile`) without text truncation, as well as serviced brand partner badges.
+                - Synced `bookFranchiseApplianceSelect` in `openBookingModal()` and updated `submitBooking()` to link selected registered products in franchise route submissions.
+              - In `frontend/customer-dashboard.html`:
+                - Separated `<label>` elements from child `<select>` controls in both company and franchise booking views to eliminate browser layout overlapping artifacts.
+            - Verification: Validated with `python3 -m py_compile`, verified FastAPI router route ordering, confirmed `get_booking_dealers` DB query execution, and validated JS with `node --check`.
 
 ==================================================
 End of Documentation

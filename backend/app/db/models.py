@@ -61,7 +61,6 @@ class CompanyBranchModel(Base):
     __table_args__ = (UniqueConstraint("company_id", "email", name="uq_company_branch_email"),)
 
     id = Column(String(64), primary_key=True, index=True)
-    company_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     company_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     branch_name = Column(String(128), nullable=False)
     manager_name = Column(String(128), nullable=False)

@@ -343,41 +343,6 @@ def list_requests(request: Request, db: Session = Depends(get_db)):
     reqs = query.order_by(ServiceRequestModel.created_at.desc()).all()
     return [format_request_detail(r, db, user=user) for r in reqs]
 
-@router.get("/{request_id}", response_model=ServiceRequestDetail)
-def get_request(request_id: str, request: Request, db: Session = Depends(get_db)):
-    user = get_authenticated_user(request, db)
-    user_id = user.id
-    req = db.query(ServiceRequestModel).filter(ServiceRequestModel.id == request_id).first()
-    if not req:
-        raise HTTPException(status_code=404, detail="Service request not found")
-    if user.role == "customer" and req.customer_id != user_id:
-        raise HTTPException(status_code=403, detail="Not allowed to view this service request")
-    if user.role == "company":
-        is_company_request = (
-            req.company_id == user.id or
-            (req.brand and user.name and (req.brand.lower() in user.name.lower() or user.name.lower() in req.brand.lower())) or
-            db.query(ApplianceModel).filter(
-                ApplianceModel.id == req.appliance_id,
-                (ApplianceModel.company_id == user.id) | (ApplianceModel.brand.ilike(user.name.strip()))
-            ).first() is not None
-        )
-        if not is_company_request:
-            raise HTTPException(status_code=403, detail="Not allowed to view this service request")
-    elif user.role in ("branch", "franchise"):
-        branch = db.query(CompanyBranchModel).filter(CompanyBranchModel.id == user_id).first()
-        is_branch_request = (
-            req.branch_id == user_id or
-            (branch and (req.branch_id == branch.id or req.pincode == branch.pincode))
-        )
-        if not is_branch_request:
-            raise HTTPException(status_code=403, detail="Not allowed to view this service request")
-    if user.role == "technician":
-        technician = db.query(TechnicianModel).filter(
-            (TechnicianModel.id == user_id) | (TechnicianModel.name == user.name)
-        ).first()
-        if req.technician_id != (technician.id if technician else user_id):
-            raise HTTPException(status_code=403, detail="Not allowed to view this service request")
-    return format_request_detail(req, db, user=user)
 
 # ==========================================
 # Timeslot Capacity & Schedule Engine
@@ -893,6 +858,11 @@ def get_booking_dealers(
                 parsed_comps = [c.strip() for c in raw_comps.split(",") if c.strip()]
 
         is_dealer = getattr(b, "is_dealer_franchise", False) or bool(parsed_comps)
+        if not parsed_comps and b.company_id:
+            parent_company = db.query(UserModel).filter(UserModel.id == b.company_id).first()
+            if parent_company and parent_company.name:
+                parsed_comps = [parent_company.name.strip()]
+
         comps_info = [
             {"name": c, "is_official": c.strip().lower() in official_names}
             for c in parsed_comps
@@ -946,6 +916,43 @@ def get_booking_dealers(
         "dealers": dealers,
         "companies": companies_list
     }
+
+
+@router.get("/{request_id}", response_model=ServiceRequestDetail)
+def get_request(request_id: str, request: Request, db: Session = Depends(get_db)):
+    user = get_authenticated_user(request, db)
+    user_id = user.id
+    req = db.query(ServiceRequestModel).filter(ServiceRequestModel.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Service request not found")
+    if user.role == "customer" and req.customer_id != user_id:
+        raise HTTPException(status_code=403, detail="Not allowed to view this service request")
+    if user.role == "company":
+        is_company_request = (
+            req.company_id == user.id or
+            (req.brand and user.name and (req.brand.lower() in user.name.lower() or user.name.lower() in req.brand.lower())) or
+            db.query(ApplianceModel).filter(
+                ApplianceModel.id == req.appliance_id,
+                (ApplianceModel.company_id == user.id) | (ApplianceModel.brand.ilike(user.name.strip()))
+            ).first() is not None
+        )
+        if not is_company_request:
+            raise HTTPException(status_code=403, detail="Not allowed to view this service request")
+    elif user.role in ("branch", "franchise"):
+        branch = db.query(CompanyBranchModel).filter(CompanyBranchModel.id == user_id).first()
+        is_branch_request = (
+            req.branch_id == user_id or
+            (branch and (req.branch_id == branch.id or req.pincode == branch.pincode))
+        )
+        if not is_branch_request:
+            raise HTTPException(status_code=403, detail="Not allowed to view this service request")
+    if user.role == "technician":
+        technician = db.query(TechnicianModel).filter(
+            (TechnicianModel.id == user_id) | (TechnicianModel.name == user.name)
+        ).first()
+        if req.technician_id != (technician.id if technician else user_id):
+            raise HTTPException(status_code=403, detail="Not allowed to view this service request")
+    return format_request_detail(req, db, user=user)
 
 
 @router.post("", response_model=ServiceRequestDetail)

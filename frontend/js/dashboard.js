@@ -473,21 +473,36 @@ function renderAppliances() {
     $("applianceCount").textContent = String(userAppliances.length);
   }
 
+  const buildApplianceOptions = (placeholder) => {
+    return `<option value="">${placeholder}</option>${userAppliances
+      .map((appliance) => {
+        const prodName = getApplianceDisplayName(appliance) || appliance.appliance_name || (appliance.category && appliance.category.toLowerCase() !== "other" ? appliance.category : "") || "Appliance";
+        const details = [appliance.brand, appliance.model_no].filter(Boolean).join(" · ");
+        const label = details ? `${prodName} (${details})` : prodName;
+        return `<option value="${escapeHtml(appliance.id)}">${escapeHtml(label)}</option>`;
+      })
+      .join("")}`;
+  };
+
   const select = $("bookApplianceSelect");
   if (select) {
     const previousValue = select.value;
-    select.innerHTML = `<option value="">Select a registered appliance</option>${userAppliances
-      .map(
-        (appliance) =>
-          `<option value="${escapeHtml(appliance.id)}">${escapeHtml(
-            appliance.brand
-          )} ${escapeHtml(appliance.category)} · ${escapeHtml(
-            appliance.model_no
-          )}</option>`
-      )
-      .join("")}`;
+    select.innerHTML = buildApplianceOptions("Select a registered appliance");
     if (userAppliances.some((appliance) => appliance.id === previousValue)) {
       select.value = previousValue;
+    }
+  }
+
+  const franchiseSelect = $("bookFranchiseApplianceSelect");
+  if (franchiseSelect) {
+    const previousFranchiseVal = franchiseSelect.value;
+    franchiseSelect.innerHTML = buildApplianceOptions(
+      userAppliances.length
+        ? "-- Select from your registered products --"
+        : "-- No registered products (enter below) --"
+    ) + (userAppliances.length ? `<option value="__other__">➕ Other / Unregistered appliance (enter below)</option>` : "");
+    if (userAppliances.some((appliance) => appliance.id === previousFranchiseVal) || previousFranchiseVal === "__other__") {
+      franchiseSelect.value = previousFranchiseVal;
     }
   }
 
@@ -1270,6 +1285,45 @@ function setupBookingRoutePreference() {
       }
     });
   }
+
+  const franchiseAppSelect = $("bookFranchiseApplianceSelect");
+  if (franchiseAppSelect) {
+    franchiseAppSelect.addEventListener("change", (e) => {
+      const appId = e.target.value;
+      if (!appId || appId === "__other__") {
+        return;
+      }
+      const app = userAppliances.find((a) => a.id === appId);
+      if (app) {
+        const prodName = getApplianceDisplayName(app) || app.appliance_name || (app.category !== "Other" ? app.category : "Appliance");
+        if ($("bookDealerAppName")) {
+          $("bookDealerAppName").value = prodName;
+        }
+        if (app.brand && brandSelect) {
+          let matched = false;
+          for (let i = 0; i < brandSelect.options.length; i++) {
+            const opt = brandSelect.options[i];
+            if (opt.value && opt.value.trim().toLowerCase() === app.brand.trim().toLowerCase()) {
+              brandSelect.selectedIndex = i;
+              matched = true;
+              break;
+            }
+          }
+          if (!matched) {
+            brandSelect.value = "__custom__";
+            if ($("bookCustomBrandContainer")) $("bookCustomBrandContainer").classList.remove("hidden");
+            if ($("bookCustomBrandInput")) $("bookCustomBrandInput").value = app.brand;
+          } else {
+            if ($("bookCustomBrandContainer")) $("bookCustomBrandContainer").classList.add("hidden");
+          }
+        }
+        if ($("bookApplianceSelect")) {
+          $("bookApplianceSelect").value = app.id;
+        }
+        triggerBookingSlotCheck();
+      }
+    });
+  }
 }
 
 function setBookingRoute(route) {
@@ -1358,16 +1412,22 @@ function renderNearbyDealersList() {
           <div class="space-y-0.5 min-w-0">
             <div class="flex items-center gap-1.5 flex-wrap">
               <span class="text-sm">🏪</span>
-              <strong class="text-xs font-bold text-slate-900 truncate">${escapeHtml(dealer.name)}</strong>
+              <strong class="text-xs font-bold text-slate-900">${escapeHtml(dealer.name)}</strong>
               <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 uppercase tracking-wider">Local Dealer & Franchise</span>
             </div>
-            <p class="text-[11px] text-slate-500 truncate">${escapeHtml(dealer.address || dealer.city || "Authorized Dealer Hub")}</p>
+            <div class="mt-1 text-[11px] text-slate-600 space-y-0.5 leading-snug">
+              <p class="flex items-start gap-1">
+                <span class="text-slate-400 shrink-0">📍</span>
+                <span><strong>Address:</strong> ${escapeHtml(dealer.address || dealer.city || "Authorized Dealer Hub")}${dealer.pincode ? ` (PIN: ${escapeHtml(dealer.pincode)})` : ""}</span>
+              </p>
+              ${dealer.mobile ? `<p class="flex items-center gap-1 text-[10px] text-slate-500 font-mono pl-4">📞 <span>${escapeHtml(dealer.mobile)}</span></p>` : ""}
+            </div>
           </div>
           <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 shrink-0 font-mono">📍 ${distText}</span>
         </div>
         ${comps.length ? `
           <div class="mt-2 pt-1.5 border-t border-slate-100 flex flex-wrap gap-1 items-center">
-            <span class="text-[10px] text-slate-400 font-medium">Franchise for:</span>
+            <span class="text-[10px] text-slate-400 font-medium">Serviced Brands:</span>
             ${comps.map(c => `
               <span class="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded ${
                 c.is_official
@@ -2149,6 +2209,15 @@ window.openBookingModal = function (applianceId = "") {
   const select = $("bookApplianceSelect");
   if (select && applianceId) select.value = applianceId;
 
+  const franchiseSelect = $("bookFranchiseApplianceSelect");
+  if (franchiseSelect && applianceId) {
+    franchiseSelect.value = applianceId;
+    const app = userAppliances.find((a) => a.id === applianceId);
+    if (app && $("bookDealerAppName")) {
+      $("bookDealerAppName").value = getApplianceDisplayName(app) || app.appliance_name || (app.category !== "Other" ? app.category : "Appliance");
+    }
+  }
+
   if (userAppliances.length === 0) {
     setBookingRoute("franchise");
   } else if (applianceId) {
@@ -2499,7 +2568,16 @@ async function submitBooking(event) {
     payload.dealer_shop_name = selectedDealer?.name || null;
     payload.brand = brand;
     payload.appliance_name = appName;
-    payload.appliance_id = $("bookApplianceSelect")?.value || null;
+    const franchiseAppId = $("bookFranchiseApplianceSelect")?.value;
+    payload.appliance_id = (franchiseAppId && franchiseAppId !== "__other__")
+      ? franchiseAppId
+      : ($("bookApplianceSelect")?.value || null);
+    if (payload.appliance_id) {
+      const matchedApp = userAppliances.find((a) => a.id === payload.appliance_id);
+      if (matchedApp && matchedApp.model_no) {
+        payload.model_no = matchedApp.model_no;
+      }
+    }
   }
 
   try {
