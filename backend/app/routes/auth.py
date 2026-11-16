@@ -19,6 +19,7 @@ from app.db.models import (
     BranchTechnicianModel,
     CompanyBranchModel,
     CompanyOnboardingModel,
+    CompanyZoneModel,
     TechnicianModel,
     TechnicianOnboardingModel,
     UserModel,
@@ -144,6 +145,13 @@ def user_payload(user: UserModel, db: Session = None) -> dict:
                 company = db.query(UserModel).filter(UserModel.id == branch.company_id).first()
                 if company:
                     data["company_name"] = company.name
+                if branch.zone_id:
+                    zone = db.query(CompanyZoneModel).filter(CompanyZoneModel.id == branch.zone_id).first()
+                    if zone:
+                        data["zone_id"] = zone.id
+                        data["zone_name"] = zone.name
+                        data["zone_district"] = zone.district
+                        data["zone_state"] = zone.state
         elif user.role == "technician":
             tech = db.query(TechnicianModel).filter_by(id=user.id).first()
             if not tech:

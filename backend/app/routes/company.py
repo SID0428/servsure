@@ -18,13 +18,15 @@ from app.db.models import (
     ApplianceModel, BranchOnboardingModel, CompanyBranchModel, UserModel,
     BranchTechnicianModel, TechnicianModel, FranchiseInventoryModel,
     SparePartModel, InventoryTransactionModel, ServiceRequestModel, WarrantyClaimModel,
-    JobCardModel, TechnicianOnboardingModel, CompanyApplianceCatalogModel
+    JobCardModel, TechnicianOnboardingModel, CompanyApplianceCatalogModel,
+    CompanyZoneModel
 )
 from app.db.session import get_db
 from app.email_service import send_brevo_email
 from app.schemas import (
     AccessTogglePayload, BranchCredentialsEmail, CompanyBranchCreate,
-    CompanyOtpVerify, CompanyPasswordSetup, CompanyApplianceCreate, CompanyApplianceResponse
+    CompanyOtpVerify, CompanyPasswordSetup, CompanyApplianceCreate, CompanyApplianceResponse,
+    CompanyZoneCreate, CompanyZoneUpdate, CompanyZoneResponse
 )
 from app.security import get_authenticated_user, revoke_all_user_sessions
 
@@ -50,7 +52,56 @@ def require_company(request: Request, db: Session) -> UserModel:
     return user
 
 
-def branch_payload(branch: CompanyBranchModel, onboarding: BranchOnboardingModel | None = None, branch_user: UserModel | None = None) -> dict:
+def extract_pincodes(raw_text: str) -> List[str]:
+    """Extracts valid 6-digit Indian PIN codes from text (comma/space/newline separated) maintaining unique order."""
+    if not raw_text:
+        return []
+    pins = re.findall(r"\b\d{6}\b", raw_text)
+    seen = set()
+    unique_pins = []
+    for pin in pins:
+        if pin not in seen:
+            seen.add(pin)
+            unique_pins.append(pin)
+    return unique_pins
+
+
+def match_zone_for_pincode(pincode: str, company_id: str, db: Session) -> Optional[CompanyZoneModel]:
+    """Finds first zone belonging to company that includes the given 6-digit pincode."""
+    if not pincode:
+        return None
+    cleaned_pin = pincode.strip()[:6]
+    zones = db.query(CompanyZoneModel).filter(CompanyZoneModel.company_id == company_id).all()
+    for zone in zones:
+        zone_pins = [p.strip() for p in zone.pincodes.split(",") if p.strip()]
+        if cleaned_pin in zone_pins:
+            return zone
+    return None
+
+
+def sync_branches_for_zone(zone: CompanyZoneModel, db: Session):
+    """Auto-assigns company branches matching this zone's pincodes.
+    Also unassigns branches from this zone if their pincode no longer matches this zone."""
+    zone_pins = set(p.strip() for p in zone.pincodes.split(",") if p.strip())
+    company_branches = db.query(CompanyBranchModel).filter(CompanyBranchModel.company_id == zone.company_id).all()
+    for branch in company_branches:
+        branch_pin = branch.pincode.strip()[:6] if branch.pincode else ""
+        if branch_pin in zone_pins:
+            branch.zone_id = zone.id
+        elif branch.zone_id == zone.id:
+            other_zone = match_zone_for_pincode(branch_pin, zone.company_id, db)
+            branch.zone_id = other_zone.id if other_zone and other_zone.id != zone.id else None
+
+
+def branch_payload(
+    branch: CompanyBranchModel,
+    onboarding: BranchOnboardingModel | None = None,
+    branch_user: UserModel | None = None,
+    zone: CompanyZoneModel | None = None
+) -> dict:
+    z_name = zone.name if zone else None
+    z_district = zone.district if zone else None
+    z_state = zone.state if zone else None
     return {
         "id": branch.id,
         "branch_name": branch.branch_name,
@@ -59,6 +110,10 @@ def branch_payload(branch: CompanyBranchModel, onboarding: BranchOnboardingModel
         "mobile": branch.mobile,
         "address": branch.address,
         "pincode": branch.pincode,
+        "zone_id": branch.zone_id,
+        "zone_name": z_name,
+        "zone_district": z_district,
+        "zone_state": z_state,
         "is_active": getattr(branch_user, "is_active", False if (onboarding and not onboarding.password_set_at) else True) if branch_user else False,
         "password_set": bool(onboarding and onboarding.password_set_at),
         "password_set_at": onboarding.password_set_at.isoformat() if onboarding and onboarding.password_set_at else None,
@@ -108,11 +163,13 @@ def list_company_branches(request: Request, db: Session = Depends(get_db)):
     onboarding = {item.branch_id: item for item in db.query(BranchOnboardingModel).all()}
     branch_users_by_id = {u.id: u for u in db.query(UserModel).filter(UserModel.role == "branch").all()}
     branch_users_by_email = {u.email.lower(): u for u in db.query(UserModel).filter(UserModel.role == "branch").all()}
+    zones_by_id = {z.id: z for z in db.query(CompanyZoneModel).filter(CompanyZoneModel.company_id == company.id).all()}
     return [
         branch_payload(
             branch,
             onboarding.get(branch.id),
-            branch_users_by_id.get(branch.id) or branch_users_by_email.get(branch.email.lower())
+            branch_users_by_id.get(branch.id) or branch_users_by_email.get(branch.email.lower()),
+            zones_by_id.get(branch.zone_id)
         )
         for branch in branches
     ]
@@ -174,7 +231,8 @@ def get_company_branch_details(
                 raise HTTPException(status_code=403, detail="Branch does not belong to your company network")
 
     onboarding = db.query(BranchOnboardingModel).filter_by(branch_id=branch.id).first()
-    base_info = branch_payload(branch, onboarding)
+    zone = db.query(CompanyZoneModel).filter(CompanyZoneModel.id == branch.zone_id).first() if branch.zone_id else None
+    base_info = branch_payload(branch, onboarding, None, zone)
     base_info["name"] = branch.branch_name
     base_info["status"] = "Active" if (onboarding and onboarding.password_set_at) else "Pending Setup"
     base_info["avatar"] = branch.branch_name[:2].upper()
@@ -802,6 +860,9 @@ def create_company_branch(payload: CompanyBranchCreate, request: Request, db: Se
     if not os.getenv("BREVO_API_KEY") or not os.getenv("BREVO_SENDER_EMAIL"):
         raise HTTPException(status_code=503, detail="Brevo is not configured. Set BREVO_API_KEY and BREVO_SENDER_EMAIL on the backend.")
 
+    matched_zone = match_zone_for_pincode(payload.pincode, company.id, db)
+    zone_id = matched_zone.id if matched_zone else None
+
     branch_id = f"branch_{uuid4().hex[:12]}"
     branch = CompanyBranchModel(
         id=branch_id,
@@ -812,6 +873,7 @@ def create_company_branch(payload: CompanyBranchCreate, request: Request, db: Se
         mobile=payload.mobile.strip(),
         address=payload.address.strip(),
         pincode=payload.pincode.strip(),
+        zone_id=zone_id,
     )
     branch_user = UserModel(
         id=branch_id,
@@ -835,7 +897,7 @@ def create_company_branch(payload: CompanyBranchCreate, request: Request, db: Se
         issue_franchise_invite(branch, onboarding, company)
         db.commit()
         db.refresh(branch)
-        return branch_payload(branch, onboarding, branch_user)
+        return branch_payload(branch, onboarding, branch_user, matched_zone)
     except Exception:
         db.rollback()
         raise
@@ -1117,3 +1179,129 @@ def verify_franchise_setup_otp(payload: CompanyOtpVerify, db: Session = Depends(
         "confirmation_email_sent": confirmation_email_sent,
         "portal_login_url": portal_url,
     }
+
+
+def zone_to_dict(zone: CompanyZoneModel, assigned_branches: List[CompanyBranchModel]) -> dict:
+    pincode_list = [p.strip() for p in zone.pincodes.split(",") if p.strip()]
+    return {
+        "id": zone.id,
+        "company_id": zone.company_id,
+        "name": zone.name,
+        "state": zone.state,
+        "district": zone.district,
+        "pincodes": zone.pincodes,
+        "pincode_list": pincode_list,
+        "description": zone.description,
+        "created_at": zone.created_at.isoformat() if zone.created_at else "",
+        "branch_count": len(assigned_branches),
+        "assigned_branches": [
+            {
+                "id": b.id,
+                "branch_name": b.branch_name,
+                "manager_name": b.manager_name,
+                "email": b.email,
+                "mobile": b.mobile,
+                "pincode": b.pincode,
+                "address": b.address,
+            }
+            for b in assigned_branches
+        ]
+    }
+
+
+@router.get("/zones")
+def list_company_zones(request: Request, db: Session = Depends(get_db)):
+    company = require_company(request, db)
+    zones = db.query(CompanyZoneModel).filter(CompanyZoneModel.company_id == company.id).order_by(CompanyZoneModel.name).all()
+    branches = db.query(CompanyBranchModel).filter(CompanyBranchModel.company_id == company.id).all()
+
+    branches_by_zone = {}
+    for b in branches:
+        if b.zone_id:
+            branches_by_zone.setdefault(b.zone_id, []).append(b)
+
+    return [zone_to_dict(zone, branches_by_zone.get(zone.id, [])) for zone in zones]
+
+
+@router.post("/zones", status_code=201)
+def create_company_zone(payload: CompanyZoneCreate, request: Request, db: Session = Depends(get_db)):
+    company = require_company(request, db)
+    pincodes = extract_pincodes(payload.pincodes)
+    if not pincodes:
+        raise HTTPException(status_code=400, detail="Please enter at least one valid 6-digit PIN code.")
+
+    zone_id = f"zone_{uuid4().hex[:12]}"
+    zone = CompanyZoneModel(
+        id=zone_id,
+        company_id=company.id,
+        name=payload.name.strip(),
+        state=payload.state.strip(),
+        district=payload.district.strip(),
+        pincodes=",".join(pincodes),
+        description=payload.description.strip() if payload.description else None,
+        created_at=datetime.utcnow()
+    )
+    db.add(zone)
+    db.flush()
+
+    sync_branches_for_zone(zone, db)
+    db.commit()
+    db.refresh(zone)
+
+    assigned_branches = db.query(CompanyBranchModel).filter(CompanyBranchModel.zone_id == zone.id).all()
+    return zone_to_dict(zone, assigned_branches)
+
+
+@router.put("/zones/{zone_id}")
+def update_company_zone(zone_id: str, payload: CompanyZoneUpdate, request: Request, db: Session = Depends(get_db)):
+    company = require_company(request, db)
+    zone = db.query(CompanyZoneModel).filter(
+        CompanyZoneModel.id == zone_id,
+        CompanyZoneModel.company_id == company.id
+    ).first()
+    if not zone:
+        raise HTTPException(status_code=404, detail="Zone not found")
+
+    if payload.name is not None:
+        zone.name = payload.name.strip()
+    if payload.state is not None:
+        zone.state = payload.state.strip()
+    if payload.district is not None:
+        zone.district = payload.district.strip()
+    if payload.pincodes is not None:
+        pincodes = extract_pincodes(payload.pincodes)
+        if not pincodes:
+            raise HTTPException(status_code=400, detail="Please enter at least one valid 6-digit PIN code.")
+        zone.pincodes = ",".join(pincodes)
+    if payload.description is not None:
+        zone.description = payload.description.strip() if payload.description else None
+
+    sync_branches_for_zone(zone, db)
+    db.commit()
+    db.refresh(zone)
+
+    assigned_branches = db.query(CompanyBranchModel).filter(CompanyBranchModel.zone_id == zone.id).all()
+    return zone_to_dict(zone, assigned_branches)
+
+
+@router.delete("/zones/{zone_id}")
+def delete_company_zone(zone_id: str, request: Request, db: Session = Depends(get_db)):
+    company = require_company(request, db)
+    zone = db.query(CompanyZoneModel).filter(
+        CompanyZoneModel.id == zone_id,
+        CompanyZoneModel.company_id == company.id
+    ).first()
+    if not zone:
+        raise HTTPException(status_code=404, detail="Zone not found")
+
+    assigned_branches = db.query(CompanyBranchModel).filter(CompanyBranchModel.zone_id == zone.id).all()
+    for branch in assigned_branches:
+        branch.zone_id = None
+        other_zone = match_zone_for_pincode(branch.pincode, company.id, db)
+        if other_zone and other_zone.id != zone.id:
+            branch.zone_id = other_zone.id
+
+    db.delete(zone)
+    db.commit()
+    return {"status": "success", "message": "Zone deleted successfully"}
+

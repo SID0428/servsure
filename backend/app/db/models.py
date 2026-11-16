@@ -78,6 +78,19 @@ class CompanyBranchModel(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     dealer_companies = Column(Text, nullable=True)
     is_dealer_franchise = Column(Boolean, nullable=True, default=False)
+    zone_id = Column(String(64), nullable=True, index=True)
+
+class CompanyZoneModel(Base):
+    __tablename__ = "company_zones"
+
+    id = Column(String(64), primary_key=True, index=True)
+    company_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    state = Column(String(128), nullable=False)
+    district = Column(String(128), nullable=False)
+    pincodes = Column(Text, nullable=False)
+    description = Column(String(256), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 class TechnicianModel(Base):
     __tablename__ = "technicians"

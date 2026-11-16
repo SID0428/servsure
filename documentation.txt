@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.2.0 (Production Release - Customer Company-to-Franchise Switch & Strict Isolation)
-Last Updated: November 16, 2026 (17:15 IST)
+Version: 2.3.0 (Production Release - Company Service Coverage Zones & Franchise Auto-Assignment)
+Last Updated: November 16, 2026 (19:15 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -24,7 +24,7 @@ TABLE OF CONTENTS
    3.2. Operational Access Control & Cascading Deactivation Rules
    3.3. Static Multi-Portal Routing & Role Guards
    3.4. Background Workers (Render Keep-Alive & SLA Engine)
-4. DATABASE MODELS & RELATIONAL SCHEMA (26 MODELS)
+4. DATABASE MODELS & RELATIONAL SCHEMA (27 MODELS)
 5. CORE API & USAGE REFERENCE
    5.1. Authentication, Sessions & Profile (/api/auth)
    5.2. Platform Administration (/api/admin)
@@ -287,7 +287,7 @@ Portal UI Cleanliness & Universal Settings Removal:
 
 
 ================================================================================
-4. DATABASE MODELS & RELATIONAL SCHEMA (26 MODELS)
+4. DATABASE MODELS & RELATIONAL SCHEMA (27 MODELS)
 ================================================================================
 All database entities are defined in `backend/app/db/models.py`:
 
@@ -343,6 +343,7 @@ All database entities are defined in `backend/app/db/models.py`:
    - `calendar_exceptions_json`: Text (JSON map of date holiday/open overrides).
    - `dealer_companies`: Text, Nullable: True (Comma-separated or JSON list of company/brand names serviced by the franchise).
    - `is_dealer_franchise`: Boolean, Default: False (Flag indicating branch is a local multi-brand dealer franchise).
+   - `zone_id`: String(64), Nullable: True, Indexed (ForeignKey to company_zones.id auto-assigned by matching address PIN code).
 
 7. `TechnicianModel` (`technicians` table):
    - `id`: String(64), Primary Key.
@@ -562,6 +563,16 @@ All database entities are defined in `backend/app/db/models.py`:
     - `installed_at`: DateTime, Nullable: True (Timestamp when installed in customer appliance via Job Card).
     - `created_at`: DateTime, Default: datetime.utcnow, Nullable: False.
 
+27. `CompanyZoneModel` (`company_zones` table):
+    - `id`: String(64), Primary Key (e.g. `zone_...`).
+    - `company_id`: String(64), ForeignKey("users.id", ondelete="CASCADE"), Index: True, Nullable: False.
+    - `name`: String(128), Nullable: False (Operational zone name, e.g. "North Delhi Zone", "Noida Central").
+    - `state`: String(128), Nullable: False (State, e.g. "Delhi", "Uttar Pradesh").
+    - `district`: String(128), Nullable: False (District, e.g. "North Delhi", "Gautam Buddha Nagar").
+    - `pincodes`: Text, Nullable: False (Normalized comma-separated list of 6-digit Indian PIN codes).
+    - `description`: String(256), Nullable: True.
+    - `created_at`: DateTime, Default: datetime.utcnow, Nullable: False.
+
 
 ================================================================================
 5. CORE API & USAGE REFERENCE
@@ -674,14 +685,25 @@ Request Headers:
 5.3. Brand / Manufacturer Management (`/api/company`)
 -----------------------------------------------------
 - `GET /api/company/metrics`: Brand ticket volume, branches, active warranty claims.
-- `GET /api/company/branches`: List all authorized franchise branches with `created_at`, `password_set`, `password_set_at`, and `is_active`.
+- `GET /api/company/branches`: List all authorized franchise branches with `created_at`, `password_set`, `password_set_at`, `is_active`, and assigned operational zone details (`zone_id`, `zone_name`, `zone_district`, `zone_state`).
 - `POST /api/company/branches`
   - Body: `{ "branch_name": "Noida Hub", "manager_name": "Amit", "email": "amit@service.com", "mobile": "+91 98111 22233", "address": "Sec 63", "pincode": "201301" }`
+  - Automatically matches franchise address `pincode` with company's defined service zones and assigns `branch.zone_id = matched_zone.id`.
   - Creates branch user account with `is_active = False` (Pending Setup) and `created_at = utcnow()`.
   - Sends setup invitation link pointing to `https://servsure.vercel.app`. Account becomes `is_active = True` and records `password_set_at` upon OTP verification.
 - `PUT /api/company/branches/{branch_id}/access`
   - Body: `{ "is_active": false }`
   - Deactivates branch and revokes all technician sessions under it.
+- `GET /api/company/zones`:
+  - Returns list of company service zones. Each zone includes: `id`, `name`, `state`, `district`, `pincodes`, `pincode_list` (parsed 6-digit PIN array), `description`, `created_at`, `branch_count`, and `assigned_branches` (franchise branch records auto-assigned to this zone).
+- `POST /api/company/zones`:
+  - Body: `{ "name": "North Delhi Zone", "state": "Delhi", "district": "North Delhi", "pincodes": "110001, 110002, 110005, 110006", "description": "Primary regional hub" }`
+  - Validates and extracts 6-digit PIN codes (comma, space, or newline separated). Creates zone and automatically triggers retroactive sync: any existing company branches with matching PIN codes are assigned `branch.zone_id = zone.id`.
+- `PUT /api/company/zones/{zone_id}`:
+  - Body: `{ "name": "...", "state": "...", "district": "...", "pincodes": "...", "description": "..." }`
+  - Updates zone definition, normalizes pincodes, and synchronizes branch assignments.
+- `DELETE /api/company/zones/{zone_id}`:
+  - Deletes the service zone and unlinks assigned franchise branches (`branch.zone_id = None`), attempting fallback re-assignment if the branch matches another company zone.
 - `GET /api/company/technicians`:
   - Query parameters: `?branch_id=<branch_id>&search=<query>`
   - Returns all technicians deployed across the company's franchise network, including their assigned branch name, branch manager, specialty, contact details, rating, ongoing/completed jobs, `created_at`, `password_set_at`, and active status.
@@ -2512,6 +2534,30 @@ were identified between the initial rough draft documentation and the actual cod
                - In `company.py` and `requests.py`: Company `list_requests` queries strictly filter out `service_route_preference == "franchise"` and `dealer_shop_name is not None`. The new franchise request is 100% invisible to the company OEM, while the original request shows as Closed on the company side.
                - In `franchise-dashboard.html`: The new ticket is immediately received by the local franchise branch manager for assignment and fulfillment.
              - Verification: Validated via automated test suite `test_switch_to_franchise.py`, `python3 -m py_compile`, and `node --check`.
+
+        13. Company Service Coverage Zones & Automated Franchise Assignment (v2.3.0):
+            - Requirement: In Company Portal, provide a "Zones" workspace navigation option allowing brand companies to define operational zones with State, District, and Pincode sets. When a franchise branch is created, it must be automatically assigned to the matching zone based on its address PIN code. The Company Portal must display for each zone which franchise branch(es) have been assigned to it, and in the Branches directory, show which zone each franchise comes under. The Franchise Portal must also prominently show its assigned operational zone.
+            - Implementation Details:
+              - Data Models & Schema (`backend/app/db/models.py`, `backend/app/seeds.py`):
+                - Added `CompanyZoneModel` (`company_zones` table) with `id`, `company_id`, `name`, `state`, `district`, `pincodes` (comma-separated 6-digit PIN list), `description`, and `created_at`.
+                - Added `zone_id` (`VARCHAR(64)`, indexed) to `CompanyBranchModel` (`company_branches` table).
+                - Added automated migration in `seeds.py` to add `zone_id` column to existing database tables.
+              - Multi-Pincode Parsing & Auto-Assignment Engine (`backend/app/routes/company.py`):
+                - Implemented `extract_pincodes(raw_text)`: Extracts 6-digit Indian PIN codes from text with commas, spaces, or newlines, deduplicating while preserving order.
+                - Implemented `match_zone_for_pincode(pincode, company_id, db)`: Resolves company zone matching a given postal code.
+                - Implemented `sync_branches_for_zone(zone, db)`: Retroactively links existing company branches when a zone is created or updated, and reassigns or unlinks branches when modified.
+                - Enhanced `POST /api/company/branches`: Automatically matches incoming branch `payload.pincode` and sets `branch.zone_id = matched_zone.id`.
+                - Implemented CRUD endpoints: `GET /api/company/zones`, `POST /api/company/zones`, `PUT /api/company/zones/{zone_id}`, `DELETE /api/company/zones/{zone_id}`.
+              - Cross-Portal Session & Payload Hydration (`backend/app/routes/auth.py`, `backend/app/routes/company.py`):
+                - In `auth.py` (`/api/auth/me` and `user_payload`): Attached `zone_id`, `zone_name`, `zone_district`, and `zone_state` to the session payload for users with role `"branch"` / `"franchise"`.
+                - In `company.py` (`GET /api/company/branches` and `branch_payload`): Hydrated franchise branches with `zone_id`, `zone_name`, `zone_district`, and `zone_state`.
+              - Frontend Workspace & Portal Experience (`frontend/company-dashboard.html`, `frontend/franchise-dashboard.html`, `frontend/js/ops-dashboard.js`):
+                - Added "Zones" to `company.nav` with icon `📍` in `ops-dashboard.js`.
+                - Company Portal Zones Workspace (`renderCompanyZones`): Displays metrics (Total Zones, Covered Districts, Franchises Assigned, Covered Pincodes), search bar, zone management table with assigned franchise badges, pincode pills preview, description, edit, and delete actions.
+                - Company Portal Branches View (`renderCompanyBranches`): Added "Assigned Zone" column with badges (`📍 <Zone Name> (<District>)` or `Unassigned`).
+                - Zone Dialog Modal (`#zoneDialog` in `company-dashboard.html`): Form for Zone name, State, District, Pincodes textarea, and description.
+                - Franchise Portal (`franchise-dashboard.html`, `renderWelcome`, `renderResources`): Displays operational zone badge in the welcome header (`📍 Zone: <Name> (<District>)`) and in the Service Area resource overview card.
+              - Verification: Verified via integration test suite `test_company_zones.py` (10 assertions passing), `python3 -m py_compile`, and `node --check`.
 
 ==================================================
 End of Documentation

@@ -9,7 +9,8 @@ from app.db.models import (
     SparePartModel, PartRequestModel, FranchiseInventoryModel, InventoryTransactionModel,
     WarrantyClaimModel, AMCPlanModel, AMCSubscriptionModel,
     EstimateModel, EscalationModel, NotificationLogModel, AuthOtpModel,
-    CompanyApplianceCatalogModel, CompanyWarrantyPolicyModel, PartSerialNumberModel
+    CompanyApplianceCatalogModel, CompanyWarrantyPolicyModel, PartSerialNumberModel,
+    CompanyZoneModel
 )
 
 def seed_database(db: Session):
@@ -370,6 +371,9 @@ def seed_database(db: Session):
     if "is_dealer_franchise" not in branch_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE company_branches ADD COLUMN is_dealer_franchise BOOLEAN DEFAULT 0"))
+    if "zone_id" not in branch_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE company_branches ADD COLUMN zone_id VARCHAR(64) NULL"))
 
     # Auto-heal legacy appliances where appliance_name is NULL or generic 'brand category' (e.g. 'gelistra Other')
     try:

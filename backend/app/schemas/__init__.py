@@ -883,3 +883,39 @@ class BranchScheduleResponse(BaseModel):
     calendar_exceptions: dict
     generated_slots: List[GeneratedSlotPreview]
 
+class CompanyZoneCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=128)
+    state: str = Field(min_length=2, max_length=128)
+    district: str = Field(min_length=2, max_length=128)
+    pincodes: str = Field(min_length=6, description="Comma/space/newline separated PIN codes")
+    description: Optional[str] = None
+
+class CompanyZoneUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=128)
+    state: Optional[str] = Field(default=None, min_length=2, max_length=128)
+    district: Optional[str] = Field(default=None, min_length=2, max_length=128)
+    pincodes: Optional[str] = Field(default=None, min_length=6)
+    description: Optional[str] = None
+
+class AssignedBranchInfo(BaseModel):
+    id: str
+    branch_name: str
+    manager_name: str
+    email: str
+    mobile: str
+    pincode: str
+    address: str
+
+class CompanyZoneResponse(BaseModel):
+    id: str
+    company_id: str
+    name: str
+    state: str
+    district: str
+    pincodes: str
+    pincode_list: List[str]
+    description: Optional[str] = None
+    created_at: str
+    assigned_branches: List[AssignedBranchInfo] = Field(default_factory=list)
+    branch_count: int = 0
+

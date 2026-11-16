@@ -76,6 +76,7 @@ const icons = {
   Overview: "📊",
   Appliances: "🧊",
   Branches: "🏢",
+  Zones: "📍",
   Technicians: "👨‍🔧",
   "Warranty Claims": "🛡️",
   "Inventory & Spares": "📦",
@@ -98,7 +99,7 @@ let role = dashboardRouteRole || initialUser?.role || (typeof document !== "unde
 const roleConfig = {
   technician: { title: "Technician workspace", kicker: "FIELD SERVICE", nav: ["My jobs", "Job history", "Route & schedule", "Help center"], columns: ["Ticket", "Customer", "Appliance", "Appointment", "Status", "Action"], tableTitle: "My assigned jobs", tableSubtitle: "Your service calls and the next step for each job.", bottomTitle: "Today's schedule", sideTitle: "My performance", resources: [["Assigned today", "Jobs on your schedule", "▤"], ["Completed", "Jobs closed this week", "✓"], ["Customer rating", "From recent service visits", "☆"], ["Service area", "Your assigned territory", "⌖"]] },
   franchise: { title: "Franchise workspace", kicker: "BRANCH OPERATIONS", nav: ["Dashboard", "Service requests", "Technicians", "Operating hours & calendar", "Inventory & Spares", "Warranty Claims", "Escalations", "Active jobs", "Customers", "Reports"], columns: ["Request ID", "Customer", "Appliance", "Issue", "Technician", "Status", "Action"], tableTitle: "Incoming service requests", tableSubtitle: "Review requests and coordinate local service work.", bottomTitle: "Branch resources", sideTitle: "Branch performance", resources: [["Technicians", "Available in this branch", "♙"], ["Active jobs", "Assigned and in progress", "⚒"], ["Inventory items", "Parts in local warehouse", "📦"], ["Service area", "Local coverage", "⌖"]] },
-  company: { title: "Company workspace", kicker: "COMPANY OPERATIONS", nav: ["Dashboard", "Appliances", "Branches", "Technicians", "Warranty Claims", "Inventory & Spares", "Escalations", "Customers", "Service requests", "Reports"], columns: ["Request ID", "Customer", "Company", "Appliance", "Status", "Date", "Action"], tableTitle: "Recent service requests", tableSubtitle: "Monitor service activity across the company network.", bottomTitle: "Network resources", sideTitle: "Network health", resources: [["Branches", "Locations in your network", "▥"], ["Warranty claims", "OEM reimbursement requests", "🛡️"], ["Technicians", "Field service professionals", "♙"], ["Customers", "Customers served", "♧"]] },
+  company: { title: "Company workspace", kicker: "COMPANY OPERATIONS", nav: ["Dashboard", "Appliances", "Branches", "Zones", "Technicians", "Warranty Claims", "Inventory & Spares", "Escalations", "Customers", "Service requests", "Reports"], columns: ["Request ID", "Customer", "Company", "Appliance", "Status", "Date", "Action"], tableTitle: "Recent service requests", tableSubtitle: "Monitor service activity across the company network.", bottomTitle: "Network resources", sideTitle: "Network health", resources: [["Branches", "Locations in your network", "▥"], ["Warranty claims", "OEM reimbursement requests", "🛡️"], ["Technicians", "Field service professionals", "♙"], ["Customers", "Customers served", "♧"]] },
   admin: { title: "Platform overview", kicker: "SERVSURE PLATFORM", nav: ["Overview", "Companies", "Branches", "Technicians", "Escalations", "Customers", "Service requests", "Reports"], columns: ["Request ID", "Customer", "Company", "Appliance", "Status", "Date", "Action"], tableTitle: "Platform service activity", tableSubtitle: "A view of requests moving across ServSure.", bottomTitle: "Platform directory", sideTitle: "Platform health", resources: [["Companies", "Service partners", "▥"], ["Branches", "Operational locations", "⌖"], ["Technicians", "Verified professionals", "♙"], ["Customers", "Registered accounts", "♧"]] },
 };
 let config = roleConfig[role] || roleConfig.company;
@@ -108,6 +109,7 @@ let requests = [];
 let companies = [];
 let companyAppliances = [];
 let branches = [];
+let companyZones = [];
 let technicians = [];
 let directoryRows = [];
 let companyCustomers = [];
@@ -374,7 +376,10 @@ function setProfile() {
     const branchName = user?.branch_name || user?.name || "Branch";
     const compName = user?.company_name || user?.name || "Authorized Service Partner";
     if ($("welcomeTitle")) $("welcomeTitle").innerHTML = `${safe(compName)} <span class="text-xs font-semibold text-slate-500 font-sans block mt-1">Branch / Franchise Dashboard</span>`;
-    if ($("welcomeSubtitle")) $("welcomeSubtitle").innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-[#0066ff] font-bold text-xs border border-blue-100">${safe(branchName)} ▾</span> <span class="text-xs text-slate-400 ml-2">Regional dispatch & field service</span>`;
+    const zoneBadge = user?.zone_name
+      ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-xs border border-emerald-200">📍 Zone: ${safe(user.zone_name)}${user.zone_district ? ' (' + safe(user.zone_district) + ')' : ''}</span>`
+      : '';
+    if ($("welcomeSubtitle")) $("welcomeSubtitle").innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-[#0066ff] font-bold text-xs border border-blue-100">${safe(branchName)} ▾</span> ${zoneBadge} <span class="text-xs text-slate-400 ml-2">Regional dispatch & field service</span>`;
   } else if (role === "company") {
     const compName = user?.name || "Company";
     if ($("welcomeTitle")) $("welcomeTitle").innerHTML = `${safe(compName)} <span class="text-xs font-semibold text-slate-500 font-sans block mt-1">Company / Operations Dashboard</span>`;
@@ -548,6 +553,7 @@ function renderPage(page) {
   setHidden("addCompanyButton", !admin);
   setHidden("addBranchButton", !(role === "company" && page === "Branches"));
   setHidden("addBranchButton", !(page === "Branches" && (role === "company" || role === "admin")));
+  setHidden("addZoneButton", !(role === "company" && page === "Zones"));
   setHidden("addTechnicianButton", !(role === "franchise" && page === "Technicians"));
   setHidden("addApplianceCatalogButton", !(role === "company" && page === "Appliances"));
   setHidden("companyInlineAdd", !admin || page !== "Companies");
@@ -564,6 +570,7 @@ function renderPage(page) {
   // Company routes
   if (role === "company" && page === "Appliances") { renderCompanyAppliances(); return; }
   if (role === "company" && page === "Branches") { renderCompanyBranches(); return; }
+  if (role === "company" && page === "Zones") { renderCompanyZones(); return; }
   if (role === "company" && page === "Technicians") { renderCompanyTechnicians(); return; }
   if (role === "company" && page === "Customers") { renderCompanyCustomers(); return; }
   if (role === "company" && page === "Warranty Claims") { renderCompanyWarrantyClaims(); return; }
@@ -1448,9 +1455,9 @@ function renderCompanyBranches() {
   if ($("activityContent")) $("activityContent").innerHTML = `<div class="section-empty">Branch records are visible only to your company account.</div>`;
   if ($("bottomTitle")) $("bottomTitle").textContent = "Company branches";
   if ($("bottomSubtitle")) $("bottomSubtitle").textContent = "Branch contacts registered by your company.";
-  if ($("requestHead")) $("requestHead").innerHTML = ["Branch", "Franchise owner or manager", "Email", "Mobile number", "Address", "Access Status", "Actions"].map((name) => `<th>${safe(name)}</th>`).join("");
+  if ($("requestHead")) $("requestHead").innerHTML = ["Branch", "Franchise owner or manager", "Email", "Mobile number", "Address", "Assigned Zone", "Access Status", "Actions"].map((name) => `<th>${safe(name)}</th>`).join("");
   const query = $("requestSearch") ? $("requestSearch").value.trim().toLowerCase() : "";
-  const filtered = branches.filter((branch) => [branch.branch_name, branch.manager_name, branch.email, branch.mobile, branch.address, branch.pincode].join(" ").toLowerCase().includes(query));
+  const filtered = branches.filter((branch) => [branch.branch_name, branch.manager_name, branch.email, branch.mobile, branch.address, branch.pincode, branch.zone_name || "", branch.zone_district || ""].join(" ").toLowerCase().includes(query));
   if ($("requestRows")) $("requestRows").innerHTML = filtered.length ? filtered.map((branch) => {
     const isPwSet = Boolean(branch.password_set || branch.password_set_at);
     const isAccessActive = branch.is_active !== false;
@@ -1462,6 +1469,9 @@ function renderCompanyBranches() {
     } else {
       accessPill = `<span class="status-pill cancelled">Access Suspended</span>`;
     }
+    const zoneBadge = branch.zone_name
+      ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">📍 ${safe(branch.zone_name)}<br><small class="text-slate-500 font-normal">${safe(branch.zone_district || '')}</small></span>`
+      : `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200">Unassigned</span>`;
     const toggleBtn = isAccessActive
       ? `<button type="button" class="table-action text-rose-600 hover:bg-rose-50 font-semibold" data-toggle-branch-access="${safe(branch.id)}" data-next-active="false">🚫 Disable Access</button>`
       : `<button type="button" class="table-action text-emerald-600 hover:bg-emerald-50 font-semibold" data-toggle-branch-access="${safe(branch.id)}" data-next-active="true">✅ Enable Access</button>`;
@@ -1473,10 +1483,11 @@ function renderCompanyBranches() {
       <td>${safe(branch.email)}</td>
       <td>${safe(branch.mobile)}</td>
       <td>${safe(branch.address)}<small class="block text-slate-400 font-mono">PIN: ${safe(branch.pincode)}</small></td>
+      <td>${zoneBadge}</td>
       <td>${accessPill}</td>
       <td>${action}</td>
     </tr>`;
-  }).join("") : `<tr><td class="empty-row" colspan="7">${query ? "No branches match your search." : "No branches yet. Add your first branch to get started."}</td></tr>`;
+  }).join("") : `<tr><td class="empty-row" colspan="8">${query ? "No branches match your search." : "No branches yet. Add your first branch to get started."}</td></tr>`;
   if ($("requestCount")) $("requestCount").textContent = `${filtered.length} branch${filtered.length === 1 ? "" : "es"} shown`;
   if ($("resourceGrid")) $("resourceGrid").innerHTML = "";
 
@@ -1546,7 +1557,7 @@ async function openCompanyBranchDetail(branchId) {
     if ($("branchModalManager")) $("branchModalManager").textContent = `👤 Manager: ${existingBranch.manager_name || "—"}`;
     if ($("branchModalEmail")) $("branchModalEmail").textContent = `✉️ ${existingBranch.email || "—"}`;
     if ($("branchModalMobile")) $("branchModalMobile").textContent = `📞 ${existingBranch.mobile || existingBranch.phone || "—"}`;
-    if ($("branchModalAddress")) $("branchModalAddress").textContent = `📍 ${existingBranch.address || "—"} (PIN: ${existingBranch.pincode || "—"})`;
+    if ($("branchModalAddress")) $("branchModalAddress").textContent = `📍 ${existingBranch.address || "—"} (PIN: ${existingBranch.pincode || "—"})${existingBranch.zone_name ? ' · Zone: ' + existingBranch.zone_name : ''}`;
     if ($("branchModalStatusBadge")) {
       const isPwSet = Boolean(existingBranch.password_set || existingBranch.password_set_at);
       if (!isPwSet) {
@@ -1605,7 +1616,7 @@ async function openCompanyBranchDetail(branchId) {
     if ($("branchModalManager")) $("branchModalManager").textContent = `👤 Manager: ${b.manager_name || "—"}`;
     if ($("branchModalEmail")) $("branchModalEmail").textContent = `✉️ ${b.email || "—"}`;
     if ($("branchModalMobile")) $("branchModalMobile").textContent = `📞 ${b.mobile || "—"}`;
-    if ($("branchModalAddress")) $("branchModalAddress").textContent = `📍 ${b.address || "—"} (PIN: ${b.pincode || "—"})`;
+    if ($("branchModalAddress")) $("branchModalAddress").textContent = `📍 ${b.address || "—"} (PIN: ${b.pincode || "—"})${b.zone_name ? ' · Zone: ' + b.zone_name : ''}`;
 
     if ($("branchStatStaff")) $("branchStatStaff").textContent = s.total_people || 0;
     if ($("branchStatTechs")) $("branchStatTechs").textContent = s.total_technicians || 0;
@@ -2957,6 +2968,235 @@ async function loadCompanyBranches() {
     }
     showToast(`Branches could not load: ${error.message}`, "error");
   }
+}
+
+async function loadCompanyZones() {
+  if (!isCurrentPage("Zones")) return;
+  if (companyZones && companyZones.length > 0) {
+    renderCompanyZones();
+  }
+  try {
+    const data = await companyApi("/zones");
+    if (!isCurrentPage("Zones")) return;
+    companyZones = Array.isArray(data) ? data : [];
+    renderCompanyZones();
+  } catch (error) {
+    if (!isCurrentPage("Zones")) return;
+    renderCompanyZones();
+    if (!companyZones || companyZones.length === 0) {
+      if ($("requestRows")) {
+        $("requestRows").innerHTML = `<tr><td class="empty-row" colspan="6">${safe(error.message)}. Try again after confirming your company session.</td></tr>`;
+      }
+      if ($("requestCount")) $("requestCount").textContent = "Could not load zones";
+    }
+    showToast(`Zones could not load: ${error.message}`, "error");
+  }
+}
+
+function openZoneDialog(zone = null) {
+  const dialog = $("zoneDialog");
+  if (!dialog) return;
+  const form = $("zoneForm");
+  if (form) form.reset();
+  if ($("zoneFormMessage")) $("zoneFormMessage").textContent = "";
+
+  if (zone) {
+    if ($("zoneDialogTitle")) $("zoneDialogTitle").textContent = "Edit service zone";
+    if ($("editingZoneId")) $("editingZoneId").value = zone.id;
+    if ($("zoneNameInput")) $("zoneNameInput").value = zone.name || "";
+    if ($("zoneStateInput")) $("zoneStateInput").value = zone.state || "";
+    if ($("zoneDistrictInput")) $("zoneDistrictInput").value = zone.district || "";
+    if ($("zonePincodesInput")) $("zonePincodesInput").value = (zone.pincode_list || []).join(", ") || (zone.pincodes || "");
+    if ($("zoneDescInput")) $("zoneDescInput").value = zone.description || "";
+    if ($("saveZoneBtn")) $("saveZoneBtn").textContent = "Update zone";
+  } else {
+    if ($("zoneDialogTitle")) $("zoneDialogTitle").textContent = "Add a service zone";
+    if ($("editingZoneId")) $("editingZoneId").value = "";
+    if ($("saveZoneBtn")) $("saveZoneBtn").textContent = "Save zone";
+  }
+
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.hidden = false;
+  }
+}
+
+function closeZoneDialog() {
+  const dialog = $("zoneDialog");
+  if (!dialog) return;
+  if (typeof dialog.close === "function") {
+    dialog.close();
+  } else {
+    dialog.hidden = true;
+  }
+}
+
+function renderCompanyZones() {
+  if ($("crumbTitle")) $("crumbTitle").textContent = "Zones";
+  if ($("metricGrid")) {
+    setHidden("metricGrid", false);
+    const totalZones = companyZones.length;
+    const coveredDistricts = new Set(companyZones.map(z => `${z.district}, ${z.state}`.toLowerCase())).size;
+    const franchisesAssigned = companyZones.reduce((acc, z) => acc + (z.branch_count || 0), 0);
+    const totalPincodes = new Set(companyZones.flatMap(z => z.pincode_list || [])).size;
+
+    $("metricGrid").innerHTML = `
+      <div class="metric-card">
+        <span class="metric-icon">📍</span>
+        <div class="metric-body">
+          <strong>${totalZones}</strong>
+          <span>Service Zones</span>
+        </div>
+      </div>
+      <div class="metric-card">
+        <span class="metric-icon">🗺️</span>
+        <div class="metric-body">
+          <strong>${coveredDistricts}</strong>
+          <span>Covered Districts</span>
+        </div>
+      </div>
+      <div class="metric-card">
+        <span class="metric-icon">🏢</span>
+        <div class="metric-body">
+          <strong>${franchisesAssigned}</strong>
+          <span>Franchises Assigned</span>
+        </div>
+      </div>
+      <div class="metric-card">
+        <span class="metric-icon">📮</span>
+        <div class="metric-body">
+          <strong>${totalPincodes}</strong>
+          <span>Covered Pincodes</span>
+        </div>
+      </div>
+    `;
+  }
+
+  setHidden("addCompanyButton", true);
+  setHidden("addBranchButton", true);
+  setHidden("addZoneButton", false);
+  setHidden("addTechnicianButton", true);
+  setHidden("addApplianceCatalogButton", true);
+  setHidden("companyInlineAdd", true);
+  setHidden("companyTechBranchFilter", true);
+  setHidden("statusFilter", true);
+  setHidden("exportButton", true);
+  setHidden("pageContent", false);
+
+  if ($("requestSearch")) $("requestSearch").placeholder = "Search zones by name, state, district, pincode, or franchise…";
+  if ($("tableTitle")) $("tableTitle").textContent = "Operational Service Zones";
+  if ($("tableSubtitle")) $("tableSubtitle").textContent = "Define geographic service zones by state, district, and pincodes. Franchise branches with matching pincodes are automatically assigned.";
+  if ($("sidePanelTitle")) $("sidePanelTitle").textContent = "Zone Directory";
+  if ($("healthContent")) $("healthContent").innerHTML = `<div class="section-empty"><strong>${companyZones.length}</strong> operational zones configured.</div>`;
+  if ($("activityContent")) $("activityContent").innerHTML = `<div class="section-empty">Franchise branches added in matching pincodes are auto-assigned to these zones.</div>`;
+  if ($("bottomTitle")) $("bottomTitle").textContent = "Coverage areas";
+  if ($("bottomSubtitle")) $("bottomSubtitle").textContent = "Regional service mapping and auto-assigned franchise distribution.";
+
+  if ($("requestHead")) {
+    $("requestHead").innerHTML = ["Zone Name", "State & District", "Assigned Franchises", "Covered Pincodes", "Description", "Actions"].map((h) => `<th>${h}</th>`).join("");
+  }
+
+  const query = ($("requestSearch")?.value || "").trim().toLowerCase();
+  const filtered = companyZones.filter((z) => {
+    const branchNames = (z.assigned_branches || []).map(b => `${b.branch_name} ${b.manager_name} ${b.pincode}`).join(" ");
+    const hay = [z.name, z.state, z.district, z.pincodes, z.description || "", branchNames].join(" ").toLowerCase();
+    return hay.includes(query);
+  });
+
+  if ($("requestRows")) {
+    $("requestRows").innerHTML = filtered.length
+      ? filtered.map((zone) => {
+          const assignedBranches = zone.assigned_branches || [];
+          let branchesDisplay = "";
+          if (assignedBranches.length === 0) {
+            branchesDisplay = '<span class="text-slate-400 text-xs italic">No franchises auto-assigned yet</span>';
+          } else {
+            branchesDisplay = assignedBranches.map((b) => `
+              <div class="inline-flex items-center gap-1.5 px-2.5 py-1 mb-1 rounded-md bg-blue-50 text-blue-800 text-xs font-medium border border-blue-200">
+                <span>🏢</span>
+                <strong>${safe(b.branch_name)}</strong>
+                <span class="text-blue-600 font-mono">(${safe(b.pincode)})</span>
+              </div>
+            `).join(" ");
+          }
+
+          const pincodes = zone.pincode_list || [];
+          let pincodesDisplay = "";
+          if (pincodes.length === 0) {
+            pincodesDisplay = '<span class="text-slate-400 text-xs italic">None</span>';
+          } else {
+            const preview = pincodes.slice(0, 5).map(p => `<span class="inline-block px-1.5 py-0.5 mr-1 mb-1 bg-slate-100 text-slate-700 rounded text-xs font-mono border border-slate-200">${safe(p)}</span>`).join("");
+            const extra = pincodes.length > 5 ? `<span class="text-xs text-slate-500 font-semibold" title="${safe(pincodes.slice(5).join(', '))}">+${pincodes.length - 5} more</span>` : "";
+            pincodesDisplay = `<div>${preview}${extra}</div>`;
+          }
+
+          return `
+            <tr class="hover:bg-slate-50/80">
+              <td>
+                <div class="font-bold text-slate-900 flex items-center gap-1.5">
+                  <span class="text-emerald-600">📍</span>
+                  <span>${safe(zone.name)}</span>
+                </div>
+                <small class="text-slate-400 text-xs font-mono">ID: ${safe(zone.id)}</small>
+              </td>
+              <td>
+                <div class="font-medium text-slate-800">${safe(zone.district)}</div>
+                <div class="text-xs text-slate-500">${safe(zone.state)}</div>
+              </td>
+              <td>
+                <div class="max-w-md">${branchesDisplay}</div>
+              </td>
+              <td>
+                <div class="max-w-xs">${pincodesDisplay}</div>
+              </td>
+              <td class="text-slate-600 text-sm">
+                ${safe(zone.description || "—")}
+              </td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <button type="button" class="table-action font-semibold text-blue-600 hover:text-blue-800" data-edit-zone="${safe(zone.id)}">Edit</button>
+                  <button type="button" class="table-action font-semibold text-rose-600 hover:bg-rose-50" data-delete-zone="${safe(zone.id)}">Delete</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("")
+      : `<tr><td class="empty-row" colspan="6">${query ? "No zones match your search." : "No service zones configured yet. Click 'Add zone' to define your coverage territory."}</td></tr>`;
+  }
+
+  if ($("requestCount")) {
+    $("requestCount").textContent = `${filtered.length} zone${filtered.length === 1 ? "" : "s"} shown`;
+  }
+  if ($("resourceGrid")) $("resourceGrid").innerHTML = "";
+
+  document.querySelectorAll("[data-edit-zone]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const zoneId = button.dataset.editZone;
+      const zone = companyZones.find((z) => z.id === zoneId);
+      if (!zone) return;
+      openZoneDialog(zone);
+    });
+  });
+
+  document.querySelectorAll("[data-delete-zone]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const zoneId = button.dataset.deleteZone;
+      const zone = companyZones.find((z) => z.id === zoneId);
+      const zoneName = zone ? zone.name : "this zone";
+      if (!window.confirm(`Are you sure you want to delete "${zoneName}"? Assigned franchise branches will be unlinked.`)) return;
+
+      button.disabled = true;
+      try {
+        await companyApi(`/zones/${encodeURIComponent(zoneId)}`, { method: "DELETE" });
+        showToast(`Zone "${zoneName}" deleted successfully.`);
+        await loadCompanyZones();
+      } catch (err) {
+        showToast(err.message, "error");
+        button.disabled = false;
+      }
+    });
+  });
 }
 
 async function loadCompanyTechnicians() {
@@ -6215,6 +6455,7 @@ async function loadWorkspacePageData(page) {
   if (role === "admin") { await loadAdminPageData(page); return; }
   if (role === "company" && page === "Appliances") { await loadCompanyAppliances(); return; }
   if (role === "company" && page === "Branches") { await loadCompanyBranches(); return; }
+  if (role === "company" && page === "Zones") { await loadCompanyZones(); return; }
   if (role === "company" && page === "Technicians") { await loadCompanyTechnicians(); return; }
   if (role === "company" && page === "Customers") { await loadCompanyCustomers(); return; }
   if (role === "company" && page === "Warranty Claims") { await loadCompanyWarrantyClaims(); return; }
@@ -8757,6 +8998,7 @@ function renderResources() {
     if (role === "company" && name === "Customers") note = companyCustomers.length + " registered product" + (companyCustomers.length === 1 ? "" : "s");
     if (role === "franchise" && name === "Customers") note = franchiseCustomers.length + " customer" + (franchiseCustomers.length === 1 ? "" : "s");
     if (role === "franchise" && name === "Inventory items") note = franchiseInventory.length + " parts in warehouse";
+    if (role === "franchise" && name === "Service area") note = user?.zone_name ? `Zone: ${user.zone_name}` : (user?.pincode ? `PIN: ${user.pincode}` : "Local coverage");
     if (role === "company" && name === "Warranty claims") note = companyWarrantyClaims.length + " reimbursement claims";
     return `<div class="resource-card"><span class="resource-icon">${icon}</span><span><strong>${name}</strong><small>${note}</small></span></div>`;
   }).join("");
@@ -9040,6 +9282,7 @@ function initEvents() {
     }
     $("branchDialog")?.showModal();
   });
+  $("addZoneButton")?.addEventListener("click", () => openZoneDialog(null));
   $("addTechnicianButton")?.addEventListener("click", () => { if ($("technicianFormMessage")) $("technicianFormMessage").textContent = ""; $("technicianDialog")?.showModal(); });
   $("addApplianceCatalogButton")?.addEventListener("click", () => {
     if ($("editingApplianceId")) $("editingApplianceId").value = "";
@@ -9059,6 +9302,8 @@ function initEvents() {
   $("cancelCompany")?.addEventListener("click", () => $("companyDialog")?.close());
   $("closeBranchDialog")?.addEventListener("click", () => { resetDealerCompaniesDropdown(); $("branchDialog")?.close(); });
   $("cancelBranch")?.addEventListener("click", () => { resetDealerCompaniesDropdown(); $("branchDialog")?.close(); });
+  $("closeZoneDialog")?.addEventListener("click", closeZoneDialog);
+  $("cancelZone")?.addEventListener("click", closeZoneDialog);
   $("closeTechnicianDialog")?.addEventListener("click", () => $("technicianDialog")?.close());
   $("cancelTechnician")?.addEventListener("click", () => $("technicianDialog")?.close());
   $("closeCompanyApplianceDialog")?.addEventListener("click", () => $("companyApplianceDialog")?.close());
@@ -9451,8 +9696,8 @@ function initEvents() {
       }
       form.reset();
       resetDealerCompaniesDropdown();
-      $("branchDialog")?.close();
-      showToast(`${created.branch_name} added. Franchise setup link sent to ${created.email}.`, "success");
+      const zoneNote = created.zone_name ? ` (Auto-assigned to ${created.zone_name})` : "";
+      showToast(`${created.branch_name} added${zoneNote}. Franchise setup link sent to ${created.email}.`, "success");
     } catch (error) {
       if ($("branchFormMessage")) $("branchFormMessage").textContent = error.message;
     } finally {
@@ -9535,6 +9780,51 @@ function initEvents() {
       showToast(`Technician added. Password setup link sent to ${created.email}.`);
     } catch (error) { if ($("technicianFormMessage")) $("technicianFormMessage").textContent = error.message; }
     finally { if (submit) submit.disabled = false; }
+  });
+
+  $("zoneForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('[type="submit"]');
+    if (submit) submit.disabled = true;
+    if ($("zoneFormMessage")) {
+      $("zoneFormMessage").className = "dialog-message text-blue-600";
+      $("zoneFormMessage").textContent = "Saving service zone…";
+    }
+
+    const editingId = $("editingZoneId")?.value?.trim();
+    const name = $("zoneNameInput")?.value?.trim();
+    const state = $("zoneStateInput")?.value?.trim();
+    const district = $("zoneDistrictInput")?.value?.trim();
+    const pincodes = $("zonePincodesInput")?.value?.trim();
+    const description = $("zoneDescInput")?.value?.trim() || null;
+
+    try {
+      const payload = { name, state, district, pincodes, description };
+      if (editingId) {
+        await companyApi(`/zones/${encodeURIComponent(editingId)}`, {
+          method: "PUT",
+          body: JSON.stringify(payload)
+        });
+        showToast(`Zone "${name}" updated successfully.`);
+      } else {
+        await companyApi("/zones", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        showToast(`Zone "${name}" created successfully. Matching branches auto-assigned.`);
+      }
+      closeZoneDialog();
+      await loadCompanyZones();
+    } catch (err) {
+      if ($("zoneFormMessage")) {
+        $("zoneFormMessage").className = "dialog-message text-rose-600";
+        $("zoneFormMessage").textContent = extractErrorMessage(err.message, "Could not save zone");
+      }
+      showToast(err.message || "Failed to save zone.", "error");
+    } finally {
+      if (submit) submit.disabled = false;
+    }
   });
 
   $("editTechnicianForm")?.addEventListener("submit", async (event) => {
