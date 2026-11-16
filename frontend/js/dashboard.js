@@ -1283,6 +1283,18 @@ function setupBookingRoutePreference() {
         $("bookCustomBrandContainer").classList.toggle("hidden", !isCustom);
         if (isCustom) $("bookCustomBrandInput")?.focus();
       }
+      if ($("bookFranchiseApplianceSelect")?.value === "__other__") {
+        const brandVal = isCustom ? $("bookCustomBrandInput")?.value?.trim() : e.target.value;
+        renderNearbyDealersList(brandVal || null);
+      }
+    });
+  }
+
+  if ($("bookCustomBrandInput")) {
+    $("bookCustomBrandInput").addEventListener("input", (e) => {
+      if ($("bookFranchiseApplianceSelect")?.value === "__other__") {
+        renderNearbyDealersList(e.target.value?.trim() || null);
+      }
     });
   }
 
@@ -1290,7 +1302,17 @@ function setupBookingRoutePreference() {
   if (franchiseAppSelect) {
     franchiseAppSelect.addEventListener("change", (e) => {
       const appId = e.target.value;
-      if (!appId || appId === "__other__") {
+      if (!appId) {
+        if ($("bookDealerAppName")) $("bookDealerAppName").value = "";
+        renderNearbyDealersList(null);
+        populateDealerBrandsDropdown();
+        return;
+      }
+      if (appId === "__other__") {
+        if ($("bookDealerAppName")) $("bookDealerAppName").value = "";
+        if ($("bookDealerBrandSelect")) $("bookDealerBrandSelect").value = "";
+        renderNearbyDealersList(null);
+        populateDealerBrandsDropdown();
         return;
       }
       const app = userAppliances.find((a) => a.id === appId);
@@ -1320,10 +1342,45 @@ function setupBookingRoutePreference() {
         if ($("bookApplianceSelect")) {
           $("bookApplianceSelect").value = app.id;
         }
+        renderNearbyDealersList(app.brand);
+        populateDealerBrandsDropdown();
         triggerBookingSlotCheck();
       }
     });
   }
+}
+
+function isDealerFranchiseForBrand(dealer, targetBrand) {
+  if (!targetBrand || !dealer) return false;
+  const tb = targetBrand.toLowerCase().trim();
+  const tbWords = tb.split(/\s+/).filter((w) => w.length > 2);
+
+  if (Array.isArray(dealer.dealer_companies)) {
+    for (const c of dealer.dealer_companies) {
+      const cLow = (c || "").toLowerCase().trim();
+      if (cLow === tb || cLow.includes(tb) || tb.includes(cLow)) return true;
+      if (tbWords.some((w) => cLow.includes(w))) return true;
+    }
+  }
+
+  if (Array.isArray(dealer.companies)) {
+    for (const comp of dealer.companies) {
+      const cLow = (comp.name || "").toLowerCase().trim();
+      if (cLow === tb || cLow.includes(tb) || tb.includes(cLow)) return true;
+      if (tbWords.some((w) => cLow.includes(w))) return true;
+    }
+  }
+
+  if (dealer.company_name) {
+    const cnLow = dealer.company_name.toLowerCase().trim();
+    if (cnLow === tb || cnLow.includes(tb) || tb.includes(cnLow)) return true;
+    if (tbWords.some((w) => cnLow.includes(w))) return true;
+  }
+
+  const bName = (dealer.branch_name || dealer.name || "").toLowerCase();
+  if (bName.includes(tb) || tbWords.some((w) => bName.includes(w))) return true;
+
+  return false;
 }
 
 function setBookingRoute(route) {
@@ -1347,8 +1404,28 @@ function setBookingRoute(route) {
     if (cardCompany) cardCompany.className = "relative cursor-pointer p-3.5 rounded-xl border-2 border-slate-200 hover:border-slate-300 bg-white flex items-start gap-3 transition";
     if (viewFranchise) viewFranchise.classList.remove("hidden");
     if (viewCompany) viewCompany.classList.add("hidden");
+
+    // Sync selected appliance from company dropdown if franchise select is empty
+    const compSelect = $("bookApplianceSelect");
+    const franSelect = $("bookFranchiseApplianceSelect");
+    if (compSelect && compSelect.value && franSelect && !franSelect.value) {
+      franSelect.value = compSelect.value;
+      const app = userAppliances.find((a) => a.id === compSelect.value);
+      if (app && $("bookDealerAppName")) {
+        $("bookDealerAppName").value = getApplianceDisplayName(app) || app.appliance_name || (app.category !== "Other" ? app.category : "Appliance");
+      }
+    } else if (franSelect && !franSelect.value && userAppliances.length === 1) {
+      franSelect.value = userAppliances[0].id;
+      const app = userAppliances[0];
+      if ($("bookDealerAppName")) {
+        $("bookDealerAppName").value = getApplianceDisplayName(app) || app.appliance_name || (app.category !== "Other" ? app.category : "Appliance");
+      }
+    }
+
     if (!currentBookingDealers.length) {
       loadBookingDealers();
+    } else {
+      renderNearbyDealersList();
     }
   }
 }
@@ -1384,11 +1461,47 @@ async function loadBookingDealers(pincode = null, lat = null, lng = null) {
   }
 }
 
-function renderNearbyDealersList() {
+function renderNearbyDealersList(targetBrand = undefined) {
   const list = $("nearbyDealersList");
   if (!list) return;
 
+  const badge = $("dealerFilterBadge");
+  const fSelect = $("bookFranchiseApplianceSelect");
+  const selectedAppId = fSelect ? fSelect.value : "";
+
+  let brand = targetBrand;
+  if (brand === undefined) {
+    if (selectedAppId && selectedAppId !== "__other__") {
+      const matchedApp = userAppliances.find((a) => a.id === selectedAppId);
+      if (matchedApp) brand = matchedApp.brand;
+    } else if (selectedAppId === "__other__") {
+      const bSelectVal = $("bookDealerBrandSelect")?.value;
+      if (bSelectVal && bSelectVal !== "__custom__") {
+        brand = bSelectVal;
+      } else {
+        brand = $("bookCustomBrandInput")?.value?.trim() || null;
+      }
+    }
+  }
+
+  // If no appliance or brand is chosen yet, prompt user to select
+  if (!brand && (!selectedAppId || selectedAppId === "")) {
+    if (badge) badge.classList.add("hidden");
+    if (!currentBookingDealers.length) {
+      list.innerHTML = `<div class="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-500 text-center">Loading authorized dealers…</div>`;
+      return;
+    }
+    list.innerHTML = `
+      <div class="p-4 bg-white rounded-xl border border-indigo-100 text-xs text-slate-600 text-center space-y-1.5 shadow-xs">
+        <span class="text-xl block">👆</span>
+        <p class="font-bold text-slate-800">Please choose an appliance from the dropdown above</p>
+        <p class="text-[11px] text-slate-400">We will instantly filter the authorized dealer franchise shops servicing that company/brand.</p>
+      </div>`;
+    return;
+  }
+
   if (!currentBookingDealers.length) {
+    if (badge) badge.classList.add("hidden");
     list.innerHTML = `
       <div class="p-3 bg-white rounded-xl border border-amber-200 text-xs text-amber-800 text-center space-y-1">
         <p class="font-bold">No localized dealer franchise found in this immediate PIN area.</p>
@@ -1397,10 +1510,46 @@ function renderNearbyDealersList() {
     return;
   }
 
-  list.innerHTML = currentBookingDealers.map((dealer) => {
+  let dealersToShow = currentBookingDealers;
+  let hasExactFranchiseMatch = false;
+
+  if (brand) {
+    const matching = currentBookingDealers.filter((d) => isDealerFranchiseForBrand(d, brand));
+    if (matching.length > 0) {
+      dealersToShow = matching;
+      hasExactFranchiseMatch = true;
+      if (badge) {
+        badge.textContent = `✓ ${matching.length} Authorized ${matching.length === 1 ? "Franchise" : "Franchises"} for ${brand}`;
+        badge.classList.remove("hidden");
+      }
+      if (!selectedDealerBranchId || !matching.some((d) => d.id === selectedDealerBranchId)) {
+        selectedDealerBranchId = matching[0].id;
+      }
+    } else {
+      dealersToShow = currentBookingDealers;
+      if (badge) {
+        badge.textContent = `Multi-Brand Dealers for ${brand}`;
+        badge.classList.remove("hidden");
+      }
+    }
+  } else {
+    if (badge) badge.classList.add("hidden");
+  }
+
+  let html = "";
+  if (brand && !hasExactFranchiseMatch) {
+    html += `
+      <div class="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-800 space-y-0.5 mb-2">
+        <p class="font-bold text-[11px]">Notice for ${escapeHtml(brand)}:</p>
+        <p class="text-[10px] text-amber-700">No exclusive franchise shop for ${escapeHtml(brand)} was found in this immediate PIN area. Showing all verified regional dealer shops equipped for repair.</p>
+      </div>`;
+  }
+
+  html += dealersToShow.map((dealer) => {
     const isSelected = dealer.id === selectedDealerBranchId;
     const distText = dealer.distance_km != null ? `${dealer.distance_km} km away` : "Nearby";
     const comps = Array.isArray(dealer.companies) ? dealer.companies : [];
+    const isFranchiseForSelectedBrand = brand ? isDealerFranchiseForBrand(dealer, brand) : false;
 
     return `
       <div class="dealer-card cursor-pointer p-3 rounded-xl border-2 transition ${
@@ -1413,7 +1562,11 @@ function renderNearbyDealersList() {
             <div class="flex items-center gap-1.5 flex-wrap">
               <span class="text-sm">🏪</span>
               <strong class="text-xs font-bold text-slate-900">${escapeHtml(dealer.name)}</strong>
-              <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 uppercase tracking-wider">Local Dealer & Franchise</span>
+              ${isFranchiseForSelectedBrand ? `
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase tracking-wider">✓ ${escapeHtml(brand)} Franchise</span>
+              ` : `
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 uppercase tracking-wider">Local Dealer & Franchise</span>
+              `}
             </div>
             <div class="mt-1 text-[11px] text-slate-600 space-y-0.5 leading-snug">
               <p class="flex items-start gap-1">
@@ -1428,7 +1581,7 @@ function renderNearbyDealersList() {
         ${comps.length ? `
           <div class="mt-2 pt-1.5 border-t border-slate-100 flex flex-wrap gap-1 items-center">
             <span class="text-[10px] text-slate-400 font-medium">Serviced Brands:</span>
-            ${comps.map(c => `
+            ${comps.map((c) => `
               <span class="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded ${
                 c.is_official
                   ? "bg-blue-100/80 text-blue-800 border border-blue-200"
@@ -1444,10 +1597,12 @@ function renderNearbyDealersList() {
     `;
   }).join("");
 
+  list.innerHTML = html;
+
   list.querySelectorAll(".dealer-card").forEach((card) => {
     card.addEventListener("click", () => {
       selectedDealerBranchId = card.dataset.branchId;
-      renderNearbyDealersList();
+      renderNearbyDealersList(brand);
       populateDealerBrandsDropdown();
     });
   });

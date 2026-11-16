@@ -956,29 +956,33 @@
 
       <!-- 3B. Nearby Local Dealer & Franchise Route View (Dynamic) -->
       <div id="bookingFranchiseRouteView" class="hidden space-y-3 p-3.5 bg-indigo-50/40 rounded-xl border border-indigo-100">
-        <div>
-          <label class="block text-xs font-bold text-slate-800 mb-1.5">
-            Select Nearby Local Dealer Shop & Franchise <span class="text-rose-500">*</span>
-          </label>
-          <div id="nearbyDealersList" class="space-y-2 max-h-48 overflow-y-auto pr-1">
-            <div class="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-500 text-center">
-              Enter address/pincode above to discover local dealers near you.
-            </div>
-          </div>
-        </div>
-
-        <!-- Registered Products Section for Local Dealer Route -->
-        <div class="p-3 bg-white rounded-xl border border-indigo-200/80 space-y-1.5 shadow-xs">
+        <!-- 1. Registered Appliances Section FIRST -->
+        <div class="p-3.5 bg-white rounded-xl border border-indigo-200/80 space-y-1.5 shadow-xs">
           <div class="flex items-center justify-between">
             <label for="bookFranchiseApplianceSelect" class="block text-xs font-bold text-slate-800">
-              Your Registered Products <span class="text-slate-500 font-normal">(Select product to repair)</span>
+              1. Select Registered Appliance <span class="text-rose-500">*</span>
             </label>
-            <span class="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">All Products</span>
+            <span class="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">All Registered Products</span>
           </div>
-          <select id="bookFranchiseApplianceSelect" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium">
-            <option value="">-- Choose a registered product (optional) --</option>
+          <select id="bookFranchiseApplianceSelect" class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium">
+            <option value="">-- Choose a registered product --</option>
           </select>
-          <p class="text-[10px] text-slate-500">Selecting a product auto-fills the brand and product details below.</p>
+          <p class="text-[11px] text-slate-500">Select an appliance to discover authorized local franchise dealers servicing that brand.</p>
+        </div>
+
+        <!-- 2. Authorized Franchise Dealers List (Filtered by selected appliance company) -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-xs font-bold text-slate-800">
+              2. Authorized Franchise Dealer Shops <span class="text-rose-500">*</span>
+            </label>
+            <span id="dealerFilterBadge" class="hidden text-[10px] font-bold text-indigo-700 bg-indigo-100/80 border border-indigo-200 px-2 py-0.5 rounded-full"></span>
+          </div>
+          <div id="nearbyDealersList" class="space-y-2 max-h-52 overflow-y-auto pr-1">
+            <div class="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-500 text-center">
+              Select an appliance above to discover matching local franchise dealers.
+            </div>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-indigo-100/60">

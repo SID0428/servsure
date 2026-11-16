@@ -864,12 +864,17 @@ def get_booking_dealers(
             except Exception:
                 parsed_comps = [c.strip() for c in raw_comps.split(",") if c.strip()]
 
-        is_dealer = getattr(b, "is_dealer_franchise", False) or bool(parsed_comps)
-        if not parsed_comps and b.company_id:
+        parent_comp_name = None
+        if b.company_id:
             parent_company = db.query(UserModel).filter(UserModel.id == b.company_id).first()
             if parent_company and parent_company.name:
-                parsed_comps = [parent_company.name.strip()]
+                parent_comp_name = parent_company.name.strip()
+                if not parsed_comps:
+                    parsed_comps = [parent_comp_name]
+                elif not any(c.lower() == parent_comp_name.lower() for c in parsed_comps):
+                    parsed_comps.append(parent_comp_name)
 
+        is_dealer = getattr(b, "is_dealer_franchise", False) or bool(parsed_comps)
         comps_info = [
             {"name": c, "is_official": c.strip().lower() in official_names}
             for c in parsed_comps
@@ -887,7 +892,9 @@ def get_booking_dealers(
             "is_outstation": bool(dist_km and dist_km > LOCAL_SERVICE_RADIUS_KM),
             "dealer_companies": parsed_comps,
             "companies": comps_info,
-            "is_dealer_franchise": is_dealer
+            "is_dealer_franchise": is_dealer,
+            "company_id": b.company_id,
+            "company_name": parent_comp_name
         })
 
     dealers.sort(key=lambda d: (d["distance_km"] is None, d["distance_km"] or 99999))

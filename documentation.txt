@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.0.9 (Production Release - Local Dealer Franchise Request Isolation from Company Portal)
-Last Updated: November 16, 2026 (00:50 IST)
+Version: 2.1.0 (Production Release - Dynamic Local Dealer Franchise Filtering by Registered Appliance)
+Last Updated: November 16, 2026 (10:05 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -2463,6 +2463,20 @@ were identified between the initial rough draft documentation and the actual cod
              - Frontend Portal Visibility Filter:
                - In `frontend/js/ops-dashboard.js`: In `requestForRole(item)`, added a check returning `false` whenever `role === "company"` and `item.service_route_preference === "franchise" || item.dealer_shop_name`. This guarantees that metric counters (`setMetrics`), service complaint tables (`renderRequests`), and search filters on the Company Portal exclude all local dealer jobs.
              - Verification: Tested with automated session isolation test suites validating company `list_requests` omission, 403 Forbidden enforcement on company `get_request`, customer/branch access retention, `python3 -m py_compile`, and `node --check`.
+
+       11. Dynamic Local Dealer Franchise Filtering by Registered Appliance (v2.1.0):
+           - Requirement: When a customer selects the "Nearby Local Dealer & Franchise" booking route, they must first see their registered appliances (prominently labeled product names). Upon selecting any registered appliance, the system must dynamically filter the nearby local dealer list to show only authorized franchise shops servicing that appliance's brand company.
+           - Implementation Details:
+             - Two-Step Modal Workflow (`frontend/customer-dashboard.html`):
+               - Restructured `#bookingFranchiseRouteView` into a clear sequential layout:
+                 - Step 1: Registered Appliance Dropdown (`#bookFranchiseApplianceSelect`) at the top, allowing quick selection of any registered appliance or switching to "(Unregistered / Other Appliance)".
+                 - Step 2: Dynamic Dealer List (`#nearbyDealersList`), accompanied by a dynamic filter badge (`#dealerFilterBadge`) showing which brand franchise is currently being filtered.
+             - Brand-to-Franchise Matching Engine (`frontend/js/dashboard.js`):
+               - Implemented `isDealerFranchiseForBrand(dealer, targetBrand)`: Normalizes brand names and dealer authorization tokens (checking `dealer_companies`, `companies`, `company_name`, and `branch_name`). Employs case-insensitive exact and word-token matching (supporting multi-word parent brands such as "Samsung India" vs "Samsung", "Gelistra", etc.).
+               - Implemented `renderNearbyDealersList(targetBrand)`: Dynamically filters dealer records to authorized franchises, displays verified badges (`✓ <Brand> Franchise`), renders complete dealer addresses with PIN codes and contact phone numbers, and auto-selects the nearest matching franchise branch.
+               - Connected `#bookFranchiseApplianceSelect` onchange handler to dynamically update `#nearbyDealersList` in real time as the user selects different appliances.
+               - In `setBookingRoute("franchise")` and `openBookingModal()`, synchronized selected appliances across company and local dealer views so the franchise filter activates immediately.
+             - Verification: Verified via `node --check frontend/js/dashboard.js`, `python3 -m py_compile`, and local database query tests confirming matching between registered appliances and authorized dealer branches.
 
 ==================================================
 End of Documentation
