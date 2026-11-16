@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.0.8 (Production Release - Local Dealer Franchise Routing, Address & Registered Products Display Fix)
-Last Updated: November 16, 2026 (00:05 IST)
+Version: 2.0.9 (Production Release - Local Dealer Franchise Request Isolation from Company Portal)
+Last Updated: November 16, 2026 (00:50 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -2446,6 +2446,23 @@ were identified between the initial rough draft documentation and the actual cod
               - In `frontend/customer-dashboard.html`:
                 - Separated `<label>` elements from child `<select>` controls in both company and franchise booking views to eliminate browser layout overlapping artifacts.
             - Verification: Validated with `python3 -m py_compile`, verified FastAPI router route ordering, confirmed `get_booking_dealers` DB query execution, and validated JS with `node --check`.
+
+       10. Local Dealer Franchise Request Strict Isolation from Company Portal (v2.0.9):
+           - Problem: When a customer booked a service visit via the "Nearby Local Dealer & Franchise" route for an appliance whose brand matched an onboarded OEM company (or had a registered appliance linked), that service request still appeared in the Company Portal (`company-dashboard.html`) and could be viewed or managed by brand OEM administrators. Local dealer bookings are direct relationships between the customer and the local dealer/franchise shop; brand OEM companies have no involvement or oversight in local dealer repairs.
+           - Resolution:
+             - Backend Service Request Isolation:
+               - In `backend/app/routes/requests.py`:
+                 - In `create_request` (`POST /api/requests`): When `route_pref == "franchise"`, `company_id` is strictly set to `None`, ensuring no foreign key linkage to any brand OEM account.
+                 - In `list_requests` (`GET /api/requests`): Added filter for `user.role == "company"` to explicitly exclude all service requests where `service_route_preference == "franchise"` or `dealer_shop_name is not None`. Only official brand company requests (`service_route_preference in ("company", None)` without dealer shop) are visible to company users.
+                 - In `get_request` (`GET /api/requests/{request_id}`): Added guard raising `HTTPException(403, "Local dealer franchise requests are not accessible to company OEM")` whenever a company user attempts to access a franchise / local dealer request.
+                 - In `assign_technician` (`POST /api/requests/{request_id}/assign`): Blocked company accounts from assigning technicians to local dealer franchise service calls.
+             - Backend Company Reporting Isolation:
+               - In `backend/app/routes/company.py`:
+                 - In `list_company_branches` and `get_company_branch_detail`: Filtered out local dealer franchise service requests from branch `total_jobs` and historical service visit lists shown to companies.
+                 - In `list_company_customers` and `get_company_customer_detail`: Excluded franchise service visits from company customer request counts and customer history.
+             - Frontend Portal Visibility Filter:
+               - In `frontend/js/ops-dashboard.js`: In `requestForRole(item)`, added a check returning `false` whenever `role === "company"` and `item.service_route_preference === "franchise" || item.dealer_shop_name`. This guarantees that metric counters (`setMetrics`), service complaint tables (`renderRequests`), and search filters on the Company Portal exclude all local dealer jobs.
+             - Verification: Tested with automated session isolation test suites validating company `list_requests` omission, 403 Forbidden enforcement on company `get_request`, customer/branch access retention, `python3 -m py_compile`, and `node --check`.
 
 ==================================================
 End of Documentation

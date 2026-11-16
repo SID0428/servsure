@@ -6760,6 +6760,10 @@ function requestForRole(item) {
     return false;
   }
   if (role === "company") {
+    // Local dealer franchise requests have nothing to do with company OEM
+    if (item.service_route_preference === "franchise" || item.dealer_shop_name) {
+      return false;
+    }
     const cId = user?.company_id || user?.id;
     const uName = (user?.name || "").trim().toLowerCase();
     if (cId && item.company_id && item.company_id === cId) return true;

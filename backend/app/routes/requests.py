@@ -327,7 +327,14 @@ def list_requests(request: Request, db: Session = Depends(get_db)):
                 ServiceRequestModel.company_id == user.id,
                 ServiceRequestModel.appliance_id.in_(company_app_ids),
                 ServiceRequestModel.brand.ilike(user.name.strip())
-            )
+            ),
+            # Local dealer franchise requests have nothing to do with the company OEM
+            or_(
+                ServiceRequestModel.service_route_preference == "company",
+                ServiceRequestModel.service_route_preference.is_(None)
+            ),
+            ServiceRequestModel.service_route_preference != "franchise",
+            ServiceRequestModel.dealer_shop_name.is_(None)
         )
     elif user.role in ("branch", "franchise"):
         branch = db.query(CompanyBranchModel).filter(CompanyBranchModel.id == user_id).first()
@@ -928,6 +935,8 @@ def get_request(request_id: str, request: Request, db: Session = Depends(get_db)
     if user.role == "customer" and req.customer_id != user_id:
         raise HTTPException(status_code=403, detail="Not allowed to view this service request")
     if user.role == "company":
+        if req.service_route_preference == "franchise" or req.dealer_shop_name:
+            raise HTTPException(status_code=403, detail="Local dealer franchise requests are not accessible to company OEM")
         is_company_request = (
             req.company_id == user.id or
             (req.brand and user.name and (req.brand.lower() in user.name.lower() or user.name.lower() in req.brand.lower())) or
@@ -1035,22 +1044,23 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
     elif not app_name:
         app_name = "Home Appliance"
 
-    # Identify company
+    # Identify company (Only if official company route; local dealer franchise requests have no company OEM involvement)
     company_id = None
-    if appliance and appliance.company_id:
-        company_id = appliance.company_id
-    elif app_brand:
-        company_user = db.query(UserModel).filter(
-            UserModel.role == "company",
-            UserModel.name.ilike(app_brand)
-        ).first()
-        if company_user:
-            company_id = company_user.id
+    if route_pref != "franchise":
+        if appliance and appliance.company_id:
+            company_id = appliance.company_id
+        elif app_brand:
+            company_user = db.query(UserModel).filter(
+                UserModel.role == "company",
+                UserModel.name.ilike(app_brand)
+            ).first()
+            if company_user:
+                company_id = company_user.id
 
-    if not company_id and route_pref == "company":
-        default_company = db.query(UserModel).filter(UserModel.role == "company").first()
-        if default_company:
-            company_id = default_company.id
+        if not company_id and route_pref == "company":
+            default_company = db.query(UserModel).filter(UserModel.role == "company").first()
+            if default_company:
+                company_id = default_company.id
 
     # Extract pincode from payload or address
     pincode = payload.pincode.strip() if payload.pincode else None
@@ -1356,6 +1366,10 @@ def assign_technician(request_id: str, payload: FranchiseAssignPayload, request:
     req = db.query(ServiceRequestModel).filter(ServiceRequestModel.id == target_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Service request not found")
+
+    if user and user.role == "company":
+        if req.service_route_preference == "franchise" or req.dealer_shop_name:
+            raise HTTPException(status_code=403, detail="Local dealer franchise requests cannot be managed by company OEM")
 
     tech = db.query(TechnicianModel).filter(
         or_(TechnicianModel.id == payload.technician_id, TechnicianModel.name == payload.technician_id)

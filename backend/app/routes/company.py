@@ -191,7 +191,15 @@ def get_company_branch_details(
         "pincode": branch.pincode,
         "role": "manager",
         "rating": 5.0,
-        "total_jobs": db.query(ServiceRequestModel).filter(ServiceRequestModel.branch_id == branch.id).count(),
+        "total_jobs": db.query(ServiceRequestModel).filter(
+            ServiceRequestModel.branch_id == branch.id,
+            or_(
+                ServiceRequestModel.service_route_preference == "company",
+                ServiceRequestModel.service_route_preference.is_(None)
+            ),
+            ServiceRequestModel.service_route_preference != "franchise",
+            ServiceRequestModel.dealer_shop_name.is_(None)
+        ).count(),
         "status": "Active" if (onboarding and onboarding.password_set_at) else "Pending Setup",
         "avatar": branch.manager_name[:2].upper()
     }
@@ -313,7 +321,13 @@ def get_company_branch_details(
 
     # 4. SERVICE REQUESTS & HISTORY (Ongoing & Completed)
     reqs = db.query(ServiceRequestModel).filter(
-        ServiceRequestModel.branch_id == branch.id
+        ServiceRequestModel.branch_id == branch.id,
+        or_(
+            ServiceRequestModel.service_route_preference == "company",
+            ServiceRequestModel.service_route_preference.is_(None)
+        ),
+        ServiceRequestModel.service_route_preference != "franchise",
+        ServiceRequestModel.dealer_shop_name.is_(None)
     ).order_by(ServiceRequestModel.created_at.desc()).all()
 
     ongoing_services = []
@@ -472,6 +486,12 @@ def list_company_customers(request: Request, db: Session = Depends(get_db)):
         reqs = db.query(ServiceRequestModel).filter(
             ServiceRequestModel.customer_id == cust_id,
             or_(
+                ServiceRequestModel.service_route_preference == "company",
+                ServiceRequestModel.service_route_preference.is_(None)
+            ),
+            ServiceRequestModel.service_route_preference != "franchise",
+            ServiceRequestModel.dealer_shop_name.is_(None),
+            or_(
                 ServiceRequestModel.company_id.in_(comp_ids),
                 ServiceRequestModel.brand.ilike(f"%{brand_clean}%") if brand_clean else False,
                 ServiceRequestModel.brand.ilike(f"%{company_brand}%") if company_brand else False
@@ -562,6 +582,12 @@ def get_company_customer_details(customer_id: str, request: Request, db: Session
 
     reqs = db.query(ServiceRequestModel).filter(
         ServiceRequestModel.customer_id == customer.id,
+        or_(
+            ServiceRequestModel.service_route_preference == "company",
+            ServiceRequestModel.service_route_preference.is_(None)
+        ),
+        ServiceRequestModel.service_route_preference != "franchise",
+        ServiceRequestModel.dealer_shop_name.is_(None),
         or_(
             ServiceRequestModel.company_id.in_(comp_ids),
             ServiceRequestModel.brand.ilike(f"%{brand_clean}%") if brand_clean else False,
