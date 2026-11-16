@@ -354,6 +354,13 @@ class RescheduleRequestPayload(BaseModel):
     new_slot: str
     reason: Optional[str] = None
 
+class SwitchToFranchisePayload(BaseModel):
+    branch_id: str = Field(min_length=1, max_length=64, description="Selected local franchise branch ID")
+    reason: Optional[str] = Field(default="Company unable to complete service", max_length=256)
+    notes: Optional[str] = Field(default=None, max_length=1000)
+    preferred_date: Optional[str] = None # Optional new date YYYY-MM-DD
+    preferred_slot: Optional[str] = None # Optional new slot
+
 class JobCardCreatePayload(BaseModel):
     work_summary: str = Field(min_length=5, max_length=2000)
     parts_used: List[JobCardPartItem] = Field(default_factory=list)

@@ -44,6 +44,7 @@ from app.schemas import (
     TimeSlotInfo,
     AvailableSlotsResponse,
     RescheduleRequestPayload,
+    SwitchToFranchisePayload,
     TechnicianBase,
     TimelineStep,
     FranchiseAssignPayload,
@@ -1358,6 +1359,190 @@ def reschedule_request(
     notify_appointment_rescheduled(req, old_date, old_slot, db)
 
     return format_request_detail(req, db, user=user)
+
+@router.post("/{request_id}/switch-to-franchise", response_model=ServiceRequestDetail)
+def switch_request_to_franchise(
+    request_id: str,
+    payload: SwitchToFranchisePayload,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    user = get_authenticated_user(request, db)
+    if user.role != "customer":
+        raise HTTPException(status_code=403, detail="Only customers can switch service request routing")
+
+    req = db.query(ServiceRequestModel).filter(ServiceRequestModel.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Service request not found")
+
+    if req.customer_id != user.id:
+        raise HTTPException(status_code=403, detail="You can only switch your own service requests")
+
+    if req.status in ["Completed", "Cancelled", "Closed"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot switch a service request with status '{req.status}'"
+        )
+
+    if req.service_route_preference == "franchise" and req.dealer_shop_name:
+        raise HTTPException(
+            status_code=400,
+            detail="This service request is already routed to an independent local franchise"
+        )
+
+    branch = db.query(CompanyBranchModel).filter(CompanyBranchModel.id == payload.branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Selected franchise partner branch not found")
+
+    now_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    switch_reason = (payload.reason or "Company unable to complete service").strip()
+    notes = (payload.notes or "").strip()
+
+    # 1. Close original request on company side
+    req.status = "Cancelled"
+    req.status_badge = "Closed"
+    # Unassign technician on company side if one was assigned
+    req.technician_id = None
+
+    orig_timeline = json.loads(req.timeline_json) if req.timeline_json else []
+    orig_timeline.append({
+        "id": f"switch_closed_{int(datetime.now().timestamp())}",
+        "title": "Closed on Company Side (Switched to Franchise)",
+        "timestamp": now_str,
+        "description": f"Customer switched service to local dealer/franchise '{branch.branch_name}'. Reason: {switch_reason}. Original company ticket closed.",
+        "state": "completed"
+    })
+    req.timeline_json = json.dumps(orig_timeline)
+    db.flush()
+
+    # 2. Determine appointment date & slot for the new franchise ticket
+    appt_date = (payload.preferred_date or req.appointment_date).strip()
+    appt_slot = (payload.preferred_slot or req.appointment_slot or "10:00 AM - 12:00 PM").strip()
+
+    # Calculate distance to selected franchise
+    dist_km = calculate_distance_km(
+        req.latitude, req.longitude, req.pincode,
+        branch.latitude, branch.longitude, branch.pincode
+    )
+    is_outstation = bool(dist_km and dist_km > LOCAL_SERVICE_RADIUS_KM)
+    slot_applicable = not is_outstation
+    outstation_note = None if not is_outstation else f"Doorstep address is {dist_km} km away from {branch.branch_name}."
+    final_slot = "Flexible / Outstation Visit" if is_outstation else appt_slot
+
+    # 3. Generate unique ticket ID and new OTPs
+    req_num = random.randint(7850, 9999)
+    new_id = f"SR-{req_num}"
+    while db.query(ServiceRequestModel).filter(ServiceRequestModel.id == new_id).first():
+        req_num = random.randint(7850, 9999)
+        new_id = f"SR-{req_num}"
+
+    start_otp_code = str(random.randint(1000, 9999))
+    completion_otp_code = str(random.randint(1000, 9999))
+    while completion_otp_code == start_otp_code:
+        completion_otp_code = str(random.randint(1000, 9999))
+    verification_otp = str(random.randint(1000, 9999))
+
+    # 4. Construct fresh franchise timeline
+    transfer_desc = f"Service complaint routed to independent local franchise '{branch.branch_name}' (Switched from company ticket {req.id})."
+    if notes:
+        transfer_desc += f" Customer Notes: {notes}"
+
+    new_timeline = [
+        {
+            "id": "step_1",
+            "title": "Request Opened with Local Franchise",
+            "timestamp": now_str,
+            "description": transfer_desc,
+            "state": "completed"
+        },
+        {
+            "id": "step_2",
+            "title": "Technician Assignment",
+            "timestamp": None,
+            "description": f"Awaiting technician dispatch by {branch.branch_name}",
+            "state": "pending"
+        },
+        {
+            "id": "step_3",
+            "title": "Technician on the Way",
+            "timestamp": None,
+            "description": "Live route tracking activates when technician starts visit",
+            "state": "pending"
+        },
+        {
+            "id": "step_4",
+            "title": "Service In Progress",
+            "timestamp": None,
+            "description": "Doorstep OTP verification & diagnostic inspection",
+            "state": "pending"
+        },
+        {
+            "id": "step_5",
+            "title": "Service Completed",
+            "timestamp": None,
+            "description": "Itemized job card billing & official closure",
+            "state": "pending"
+        }
+    ]
+
+    new_desc = f"Transferred from company ticket {req.id}. Customer Reason: {switch_reason}."
+    if notes:
+        new_desc += f" Instructions: {notes}"
+    if req.description:
+        new_desc += f" Original notes: {req.description}"
+
+    # 5. Create new Franchise Request with ZERO company connection
+    new_req = ServiceRequestModel(
+        id=new_id,
+        customer_id=user.id,
+        customer_name=req.customer_name,
+        customer_phone=req.customer_phone,
+        customer_address=req.customer_address,
+        appliance_id=req.appliance_id,
+        appliance_name=req.appliance_name,
+        brand=req.brand,
+        model_no=req.model_no,
+        issue=req.issue,
+        description=new_desc,
+        priority=req.priority or "Medium",
+        status="Request Created",
+        status_badge="In Progress",
+        created_at=now_str,
+        appointment_date=appt_date,
+        appointment_slot=final_slot,
+        technician_id=None,
+        branch_id=branch.id,
+        company_id=None,  # STRICTLY NULL - Completely isolated from company OEM
+        service_route_preference="franchise",  # STRICTLY FRANCHISE ROUTE
+        dealer_shop_name=branch.branch_name,  # Local dealer name
+        pincode=req.pincode,
+        latitude=req.latitude,
+        longitude=req.longitude,
+        verification_otp=verification_otp,
+        start_otp=start_otp_code,
+        completion_otp=completion_otp_code,
+        is_start_otp_verified=False,
+        completion_otp_requested=False,
+        timeline_json=json.dumps(new_timeline),
+        defect_photo=req.defect_photo,
+        is_outstation=is_outstation,
+        distance_km=dist_km,
+        slot_applicable=slot_applicable,
+        outstation_note=outstation_note,
+        visiting_charge=req.visiting_charge or 299.0,
+        is_visiting_charge_tax_inclusive=req.is_visiting_charge_tax_inclusive if req.is_visiting_charge_tax_inclusive is not None else True
+    )
+
+    db.add(new_req)
+    db.commit()
+    db.refresh(new_req)
+
+    try:
+        notify_booking_created(new_req, db)
+    except Exception as notify_err:
+        print(f"Notification error on switch to franchise: {notify_err}")
+
+    return format_request_detail(new_req, db, user=user)
 
 @router.post("/{request_id}/assign", response_model=ServiceRequestDetail)
 def assign_technician(request_id: str, payload: FranchiseAssignPayload, request: Request, db: Session = Depends(get_db)):

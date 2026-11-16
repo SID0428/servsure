@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.1.0 (Production Release - Dynamic Local Dealer Franchise Filtering by Registered Appliance)
-Last Updated: November 16, 2026 (10:05 IST)
+Version: 2.2.0 (Production Release - Customer Company-to-Franchise Switch & Strict Isolation)
+Last Updated: November 16, 2026 (17:15 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -817,6 +817,21 @@ Request Headers:
   - Outstation Requests: If `slot_applicable == false` or `is_outstation == true`, allows flexible date rescheduling without failing hourly slot capacity checks.
   - Local Requests: Verifies dynamic slot availability, branch calendar exceptions, and lead-time cutoff on `new_date`.
   - Side Effects: Updates `appointment_date`, `appointment_slot`, appends `Appointment Rescheduled` event to `timeline_json`, and dispatches Brevo transactional notification (`notify_appointment_rescheduled`).
+- `POST /api/requests/{request_id}/switch-to-franchise`:
+  - Body: `{ "branch_id": "br_1", "reason": "Company unable to complete service / parts out of stock", "notes": "Need local 3rd-party part sourcing", "preferred_date": "2026-11-21", "preferred_slot": "01:00 PM - 03:00 PM" }`
+  - Access Control: Only the customer who owns the request can switch route.
+  - Lifecycle Lock: Rejected with HTTP 400 if request status is `Completed`, `Cancelled`, or `Closed`, or if request is already a franchise route.
+  - Original Request Closure:
+    - Sets `status = "Cancelled"`, `status_badge = "Closed"`.
+    - Unassigns any company technician (`technician_id = None`).
+    - Appends audit timeline step: *"Closed on Company Side (Switched to Franchise): Customer switched service to local dealer/franchise '{branch_name}'. Reason: {reason}."*
+  - New Franchise Request Creation:
+    - Opens fresh ticket (`SR-xxxx`) assigned to chosen local franchise (`branch_id = payload.branch_id`, `dealer_shop_name = branch.branch_name`).
+    - Sets `service_route_preference = "franchise"` and `company_id = None` (strictly isolating it from the Company Portal).
+    - Preserves appliance details, issue, doorstep address, coordinates, and photo.
+    - Generates new doorstep OTPs (`start_otp`, `completion_otp`, `verification_otp`).
+    - Builds fresh franchise timeline starting with *"Request Opened with Local Franchise"*.
+    - Returns newly created `ServiceRequestDetail`.
 
 5.7. Customer Appliances & Warranty (`/api/appliances`)
 -------------------------------------------------------
@@ -2477,6 +2492,25 @@ were identified between the initial rough draft documentation and the actual cod
                - Connected `#bookFranchiseApplianceSelect` onchange handler to dynamically update `#nearbyDealersList` in real time as the user selects different appliances.
                - In `setBookingRoute("franchise")` and `openBookingModal()`, synchronized selected appliances across company and local dealer views so the franchise filter activates immediately.
              - Verification: Verified via `node --check frontend/js/dashboard.js`, `python3 -m py_compile`, and local database query tests confirming matching between registered appliances and authorized dealer branches.
+
+       12. Customer Service Request Switch from Company to Local Franchise & Strict Company Isolation (v2.2.0):
+           - Requirement: If a customer booked a service complaint with the Brand OEM company, but the company is unable to complete the service (e.g. technician unavailable, parts delayed/backordered, or customer needs faster resolution via local dealer/third-party help), the customer must be able to switch that service request to an authorized local franchise dealer directly from the Customer Portal. The original request must be closed on the company side, and a new request opened in the chosen franchise with zero company connection.
+           - Implementation Details:
+             - Backend API & Data Mechanics (`backend/app/routes/requests.py`, `backend/app/schemas/__init__.py`):
+               - Schema `SwitchToFranchisePayload`: Captures `branch_id`, `reason`, optional `notes`, `preferred_date`, and `preferred_slot`.
+               - Endpoint `POST /api/requests/{request_id}/switch-to-franchise`:
+                 - Guard & Validation: Authenticates customer ownership, validates that the ticket is active (not `Completed`, `Cancelled`, or `Closed`), and confirms it is currently a company route.
+                 - Original Request Closure: Updates `status = "Cancelled"`, `status_badge = "Closed"`, unassigns any technician on company side (`technician_id = None`), and appends an audit event to `timeline_json`: *"Closed on Company Side (Switched to Franchise): Customer switched service to local dealer/franchise '{branch_name}'. Reason: {reason}. Original company ticket closed."*
+                 - New Franchise Request Creation: Opens a new ticket (`SR-xxxx`), sets `service_route_preference = "franchise"`, `company_id = None` (strictly isolating it from OEM queries), `dealer_shop_name = branch.branch_name`, and `branch_id = branch.id`. Preserves appliance details, issue, address, and defect photo. Generates fresh start and completion OTPs and dispatches booking notifications.
+             - Frontend Customer Experience (`frontend/customer-dashboard.html`, `frontend/js/dashboard.js`):
+               - Active Request Cards: Renders quick-action button `🔄 Switch to Franchise` on active company request cards.
+               - Request Tracking View: Renders `#switchToFranchiseBanner` displaying *"Company Unable to Complete?"* with button `Switch to Local Franchise` for active company tickets.
+               - Modal Dialog (`#switchFranchiseModal`): Displays ticket summary, reason selector (technician shortage, parts out of stock, delay, customer preference), optional instruction notes, dynamic authorized franchise partner picker (with distance, address, contact, and franchise badges), and appointment date/slot selectors.
+               - On submission, executes `POST /api/requests/{request_id}/switch-to-franchise`, reloads dashboard data, and transitions tracking directly to the new franchise ticket.
+             - Portal Isolation Verification:
+               - In `company.py` and `requests.py`: Company `list_requests` queries strictly filter out `service_route_preference == "franchise"` and `dealer_shop_name is not None`. The new franchise request is 100% invisible to the company OEM, while the original request shows as Closed on the company side.
+               - In `franchise-dashboard.html`: The new ticket is immediately received by the local franchise branch manager for assignment and fulfillment.
+             - Verification: Validated via automated test suite `test_switch_to_franchise.py`, `python3 -m py_compile`, and `node --check`.
 
 ==================================================
 End of Documentation

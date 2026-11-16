@@ -440,6 +440,28 @@
               </div>
             </div>
 
+            <!-- Switch to Local Franchise Banner (Available for company-routed tickets) -->
+            <div id="switchToFranchiseBanner" class="hidden rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50/90 via-blue-50/50 to-white p-4 shadow-xs transition-all">
+              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div class="flex items-start gap-3">
+                  <div class="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 shadow-xs">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <strong class="text-xs font-bold text-slate-900">Company Unable to Complete?</strong>
+                      <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">Franchise Option</span>
+                    </div>
+                    <p class="text-[11px] text-slate-600 mt-0.5 leading-relaxed">If company service is delayed or lacks parts, switch this ticket to an authorized local franchise dealer with independent third-party parts & service.</p>
+                  </div>
+                </div>
+                <button type="button" id="openSwitchFranchiseBtn" class="shrink-0 w-full sm:w-auto py-2 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                  <span>Switch to Local Franchise</span>
+                </button>
+              </div>
+            </div>
+
             <!-- 4. Connected Vertical Service Timeline (with clickable Live Tracking) -->
             <div class="rounded-2xl border border-slate-200/80 p-5 bg-white shadow-xs">
               <div class="flex items-center justify-between mb-4">
@@ -1150,6 +1172,127 @@
           <button type="button" id="cancelRescheduleBtn" class="rounded-xl px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-100">Keep Current Appointment</button>
           <button type="submit" id="submitRescheduleBtn" class="rounded-xl bg-[#0066ff] hover:bg-blue-700 px-5 py-2.5 text-xs font-bold text-white shadow-sm transition flex items-center gap-1.5">
             <span>📅</span> Confirm Reschedule
+          </button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- ============================================================== -->
+  <!-- 6C. SWITCH REQUEST TO LOCAL FRANCHISE / DEALER MODAL -->
+  <!-- ============================================================== -->
+  <dialog id="switchFranchiseModal" class="w-[min(94vw,560px)] rounded-3xl border-0 p-0 shadow-2xl overflow-hidden bg-white">
+    <div class="p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-start justify-between border-b border-slate-100 pb-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] font-bold tracking-[.16em] text-indigo-600 uppercase">SERVICE DISPATCH TRANSFER</span>
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">SWITCH ROUTE</span>
+          </div>
+          <h3 class="font-display text-base font-bold text-slate-900 mt-1">Switch to Local Franchise / Dealer</h3>
+          <p class="text-xs text-slate-400">Transfer from company to an authorized local franchise with independent parts & service</p>
+        </div>
+        <button type="button" id="closeSwitchFranchiseModalBtn" class="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 text-lg leading-none" aria-label="Close">✕</button>
+      </div>
+
+      <div class="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-3.5 text-xs text-indigo-950 space-y-1.5">
+        <div class="flex items-center gap-2 font-bold text-indigo-900">
+          <span>ℹ️</span>
+          <span>How Franchise Switching Works</span>
+        </div>
+        <p class="text-[11px] text-indigo-800/90 leading-relaxed">
+          If the company is unable to complete your service or experiencing delays, you can switch this request to an authorized local franchise shop.
+          <strong>This service ticket will be closed on the company side</strong> and a <strong>new ticket will open with the chosen franchise</strong> with zero company involvement.
+        </p>
+      </div>
+
+      <form id="switchFranchiseForm" class="space-y-4 text-xs">
+        <input type="hidden" id="switchFranchiseRequestId">
+
+        <!-- Current Ticket Summary -->
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-slate-500 font-medium">Original Ticket:</span>
+            <strong id="switchTicketBadge" class="font-mono text-indigo-700 font-bold">—</strong>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-slate-500 font-medium">Appliance:</span>
+            <strong id="switchApplianceBadge" class="text-slate-800 font-semibold">—</strong>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-slate-500 font-medium">Current Issue:</span>
+            <span id="switchIssueBadge" class="text-slate-700 truncate max-w-[240px]">—</span>
+          </div>
+        </div>
+
+        <!-- Step 1: Reason for Switching -->
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">
+            Reason for Switching to Local Franchise <span class="text-rose-500">*</span>
+          </label>
+          <select id="switchReasonSelect" required class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-xs bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20">
+            <option value="Company unable to complete service / technician unavailable">Company unable to complete service / technician unavailable</option>
+            <option value="Required spare parts delayed or out of stock with company">Required spare parts delayed or out of stock with company</option>
+            <option value="Urgent repair required - Local franchise / 3rd party faster">Urgent repair required - Local franchise / 3rd party faster</option>
+            <option value="Company service visit delayed or rescheduled repeatedly">Company service visit delayed or rescheduled repeatedly</option>
+            <option value="Customer preferred local dealer franchise">Customer preferred local dealer franchise</option>
+            <option value="Other / Customer requested transfer">Other / Customer requested transfer</option>
+          </select>
+        </div>
+
+        <!-- Additional Notes -->
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">
+            Additional Instructions / Part Details (Optional)
+          </label>
+          <textarea id="switchNotes" rows="2" placeholder="e.g., Company told motor is not available, need local market part sourcing..." class="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-xs bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"></textarea>
+        </div>
+
+        <!-- Step 2: Choose Authorized Local Franchise Dealer -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block font-semibold text-slate-700">
+              Select Authorized Local Franchise Partner <span class="text-rose-500">*</span>
+            </label>
+            <span id="switchDealerCountTag" class="text-[10px] text-slate-400 font-mono"></span>
+          </div>
+          <div id="switchDealersContainer" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+            <div class="py-6 text-center text-slate-400 text-xs">Loading authorized nearby franchises...</div>
+          </div>
+          <input type="hidden" id="selectedSwitchBranchId" required>
+        </div>
+
+        <!-- Step 3: Appointment Date & Slot -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-slate-100">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">
+              Preferred Date <span class="text-rose-500">*</span>
+            </label>
+            <input type="date" id="switchApptDate" required class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-xs bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">
+              Preferred Slot <span class="text-rose-500">*</span>
+            </label>
+            <select id="switchApptSlot" required class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-xs bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20">
+              <option value="10:00 AM - 12:00 PM">10:00 AM - 12:00 PM</option>
+              <option value="01:00 PM - 03:00 PM">01:00 PM - 03:00 PM</option>
+              <option value="04:00 PM - 06:00 PM">04:00 PM - 06:00 PM</option>
+              <option value="06:00 PM - 08:00 PM">06:00 PM - 08:00 PM</option>
+              <option value="Flexible / Outstation Visit">Flexible Visit (Any time)</option>
+            </select>
+          </div>
+        </div>
+
+        <p id="switchFranchiseFormMsg" class="min-h-4 text-xs text-rose-600 font-medium hidden" role="status"></p>
+
+        <!-- Action Buttons -->
+        <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+          <button type="button" id="cancelSwitchFranchiseBtn" class="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-semibold text-xs hover:bg-slate-50 transition">
+            Keep Company Request
+          </button>
+          <button type="submit" id="confirmSwitchFranchiseBtn" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition">
+            <span>Confirm & Switch to Franchise</span>
           </button>
         </div>
       </form>

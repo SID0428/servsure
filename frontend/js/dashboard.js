@@ -1037,24 +1037,38 @@ function renderRequests() {
                   <span class="text-xl font-bold text-[#0066ff] group-hover:translate-x-0.5 transition-transform">›</span>
                 </div>
               </div>
-              <div class="pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                <div class="flex items-center gap-2 truncate">
+              <div class="pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 gap-2">
+                <div class="flex items-center gap-2 truncate min-w-0">
                   <span class="w-2 h-2 rounded-full bg-[#0066ff] shrink-0"></span>
                   <span class="truncate font-medium text-slate-600">${escapeHtml(
                     appointmentInfo
                   )}</span>
                 </div>
-                ${
-                  !request.is_start_otp_verified && request.start_otp && ["Technician Assigned", "Technician on the Way", "Confirmed", "Pending", "Reopened / Under Review"].includes(request.status)
-                    ? `<span class="font-mono font-bold text-amber-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded text-[10px]">Start OTP: ${escapeHtml(request.start_otp)}</span>`
-                    : (request.completion_otp && request.completion_otp_requested
-                      ? `<span class="font-mono font-bold text-indigo-900 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded text-[10px]">Completion OTP: ${escapeHtml(request.completion_otp)}</span>`
-                      : "")
-                }
+                <div class="flex items-center gap-2 shrink-0">
+                  ${
+                    request.service_route_preference !== "franchise" && !request.dealer_shop_name && !["Completed", "Cancelled", "Closed"].includes(request.status) && !["Completed", "Closed"].includes(request.status_badge)
+                      ? `<button type="button" class="switch-to-franchise-card-btn inline-flex items-center gap-1 font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-full border border-indigo-200 text-[10px] transition" data-request-id="${escapeHtml(request.id)}" title="Switch to Local Franchise">🔄 Switch to Franchise</button>`
+                      : ""
+                  }
+                  ${
+                    !request.is_start_otp_verified && request.start_otp && ["Technician Assigned", "Technician on the Way", "Confirmed", "Pending", "Reopened / Under Review"].includes(request.status)
+                      ? `<span class="font-mono font-bold text-amber-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded text-[10px]">Start OTP: ${escapeHtml(request.start_otp)}</span>`
+                      : (request.completion_otp && request.completion_otp_requested
+                        ? `<span class="font-mono font-bold text-indigo-900 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded text-[10px]">Completion OTP: ${escapeHtml(request.completion_otp)}</span>`
+                        : "")
+                  }
+                </div>
               </div>
             </div>`;
         })
         .join("");
+
+      activeList.querySelectorAll(".switch-to-franchise-card-btn").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          window.openSwitchFranchiseModal(btn.dataset.requestId);
+        });
+      });
 
       activeList.querySelectorAll(".request-card").forEach((card) => {
         card.addEventListener("click", () => {
@@ -1820,7 +1834,7 @@ function populateTracking(request) {
     }
   }
   if ($("rescheduleBtn")) {
-    const lockedStates = ["Service In Progress", "Repair in Progress", "Completed", "Cancelled"];
+    const lockedStates = ["Service In Progress", "Repair in Progress", "Completed", "Cancelled", "Closed"];
     const canReschedule = !lockedStates.includes(request.status);
     if (canReschedule) {
       $("rescheduleBtn").style.display = "inline-flex";
@@ -1829,6 +1843,23 @@ function populateTracking(request) {
       $("rescheduleBtn").onclick = () => window.openRescheduleModal(request.id);
     } else {
       $("rescheduleBtn").style.display = "none";
+    }
+  }
+
+  // Switch to Local Franchise Banner (Company to Franchise dispatch transfer)
+  const switchBanner = $("switchToFranchiseBanner");
+  const switchBtn = $("openSwitchFranchiseBtn");
+  if (switchBanner) {
+    const isClosedOrDone = ["Completed", "Cancelled", "Closed"].includes(request.status) || ["Completed", "Closed"].includes(request.status_badge);
+    const isAlreadyFranchise = request.service_route_preference === "franchise" || Boolean(request.dealer_shop_name);
+    const canSwitch = !isClosedOrDone && !isAlreadyFranchise;
+    if (canSwitch) {
+      switchBanner.classList.remove("hidden");
+      if (switchBtn) {
+        switchBtn.onclick = () => window.openSwitchFranchiseModal(request.id);
+      }
+    } else {
+      switchBanner.classList.add("hidden");
     }
   }
 
@@ -4226,6 +4257,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Switch to Franchise Modal listeners
+  if ($("closeSwitchFranchiseModalBtn")) {
+    $("closeSwitchFranchiseModalBtn").addEventListener("click", () => closeDialog("switchFranchiseModal"));
+  }
+  if ($("cancelSwitchFranchiseBtn")) {
+    $("cancelSwitchFranchiseBtn").addEventListener("click", () => closeDialog("switchFranchiseModal"));
+  }
+  if ($("switchFranchiseForm")) {
+    $("switchFranchiseForm").addEventListener("submit", submitSwitchFranchise);
+  }
+
   // Instantly hydrate user profile from localStorage cache to eliminate any flash during refresh
   const cachedUser = readStoredUser();
   if (cachedUser && cachedUser.role === "customer") {
@@ -4564,5 +4606,216 @@ async function submitReschedule(event) {
     }
   }
 }
+
+let currentSwitchDealers = [];
+
+async function loadSwitchDealers(brand, pincode = null, lat = null, lng = null) {
+  const container = $("switchDealersContainer");
+  const countTag = $("switchDealerCountTag");
+  const hiddenBranch = $("selectedSwitchBranchId");
+  if (!container) return;
+
+  container.innerHTML = `<div class="py-6 text-center text-slate-400 text-xs">Loading authorized nearby franchises...</div>`;
+  if (hiddenBranch) hiddenBranch.value = "";
+
+  const queryParams = new URLSearchParams();
+  if (pincode) queryParams.set("pincode", pincode);
+  if (lat != null && !isNaN(lat)) queryParams.set("latitude", String(lat));
+  if (lng != null && !isNaN(lng)) queryParams.set("longitude", String(lng));
+
+  try {
+    const res = await readApiJson(`/api/requests/booking-dealers?${queryParams.toString()}`);
+    currentSwitchDealers = Array.isArray(res.dealers) ? res.dealers : [];
+
+    let matching = currentSwitchDealers;
+    if (brand) {
+      const brandMatches = currentSwitchDealers.filter((d) => isDealerFranchiseForBrand(d, brand));
+      if (brandMatches.length > 0) {
+        matching = brandMatches;
+      }
+    }
+
+    if (!matching.length) {
+      if (countTag) countTag.textContent = "0 Found";
+      container.innerHTML = `
+        <div class="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-800 text-center space-y-1">
+          <p class="font-bold">No localized franchise branch registered in this immediate area.</p>
+          <p class="text-[10px] text-amber-700">Central dispatch will assign the nearest regional franchise upon submission.</p>
+        </div>`;
+      if (hiddenBranch) hiddenBranch.value = currentSwitchDealers[0]?.id || "";
+      return;
+    }
+
+    if (countTag) {
+      countTag.textContent = `${matching.length} Verified Partner${matching.length === 1 ? "" : "s"}`;
+    }
+
+    let selectedId = matching[0].id;
+    if (hiddenBranch) hiddenBranch.value = selectedId;
+
+    function renderCards() {
+      container.innerHTML = matching.map((dealer) => {
+        const isSelected = dealer.id === selectedId;
+        const distText = dealer.distance_km != null ? `${dealer.distance_km} km away` : "Nearby";
+        const isBrandAuth = brand ? isDealerFranchiseForBrand(dealer, brand) : false;
+
+        return `
+          <div class="switch-dealer-card cursor-pointer p-3 rounded-2xl border-2 transition ${
+            isSelected
+              ? "border-indigo-600 bg-indigo-50/70 shadow-xs ring-1 ring-indigo-500/20"
+              : "border-slate-200 hover:border-slate-300 bg-white"
+          }" data-branch-id="${escapeHtml(dealer.id)}">
+            <div class="flex items-start justify-between gap-2">
+              <div class="space-y-0.5 min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="text-sm">🏪</span>
+                  <strong class="text-xs font-bold text-slate-900">${escapeHtml(dealer.name)}</strong>
+                  ${isBrandAuth ? `
+                    <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase tracking-wider">✓ ${escapeHtml(brand)} Franchise</span>
+                  ` : `
+                    <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 uppercase tracking-wider">Local Franchise & Dealer</span>
+                  `}
+                </div>
+                <p class="text-[11px] text-slate-600 leading-snug">
+                  ${escapeHtml(dealer.address || "Address on file")}
+                  ${dealer.pincode ? ` · PIN: ${escapeHtml(dealer.pincode)}` : ""}
+                </p>
+                <div class="flex items-center gap-3 pt-0.5 text-[10px] text-slate-500">
+                  <span class="font-medium text-slate-700">📍 ${escapeHtml(distText)}</span>
+                  ${dealer.mobile ? `<span class="font-medium text-indigo-700">📞 ${escapeHtml(dealer.mobile)}</span>` : ""}
+                </div>
+              </div>
+              <div class="shrink-0 pt-0.5">
+                <input type="radio" name="switchDealerRadio" value="${escapeHtml(dealer.id)}" ${isSelected ? "checked" : ""} class="text-indigo-600 focus:ring-indigo-500 cursor-pointer pointer-events-none">
+              </div>
+            </div>
+          </div>`;
+      }).join("");
+
+      container.querySelectorAll(".switch-dealer-card").forEach((card) => {
+        card.addEventListener("click", () => {
+          selectedId = card.dataset.branchId;
+          if (hiddenBranch) hiddenBranch.value = selectedId;
+          renderCards();
+        });
+      });
+    }
+
+    renderCards();
+  } catch (err) {
+    console.warn("Could not load switch dealers:", err);
+    container.innerHTML = `<div class="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-500 text-center">Unable to load nearby dealer list. Default regional franchise will be selected.</div>`;
+    if (hiddenBranch && currentSwitchDealers[0]) hiddenBranch.value = currentSwitchDealers[0].id;
+  }
+}
+
+window.openSwitchFranchiseModal = async function(requestId) {
+  const req = userRequests.find((r) => r.id === requestId);
+  if (!req) return;
+
+  const isClosedOrDone = ["Completed", "Cancelled", "Closed"].includes(req.status) || ["Completed", "Closed"].includes(req.status_badge);
+  if (isClosedOrDone) {
+    showToast(`Service ticket "${req.id}" is already completed or cancelled.`, "warning");
+    return;
+  }
+
+  if (req.service_route_preference === "franchise" && req.dealer_shop_name) {
+    showToast(`Service ticket "${req.id}" is already assigned to local franchise ${req.dealer_shop_name}.`, "info");
+    return;
+  }
+
+  if ($("switchFranchiseRequestId")) $("switchFranchiseRequestId").value = req.id;
+  if ($("switchTicketBadge")) $("switchTicketBadge").textContent = req.id;
+  if ($("switchApplianceBadge")) $("switchApplianceBadge").textContent = `${req.appliance_name || req.brand || 'Appliance'}${req.model_no ? ` (${req.model_no})` : ""}`;
+  if ($("switchIssueBadge")) $("switchIssueBadge").textContent = req.issue || "General Service Complaint";
+  if ($("switchNotes")) $("switchNotes").value = "";
+  if ($("switchFranchiseFormMsg")) {
+    $("switchFranchiseFormMsg").classList.add("hidden");
+    $("switchFranchiseFormMsg").textContent = "";
+  }
+  if ($("selectedSwitchBranchId")) $("selectedSwitchBranchId").value = "";
+
+  const today = new Date();
+  const localToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  if ($("switchApptDate")) {
+    $("switchApptDate").min = localToday;
+    $("switchApptDate").value = (req.appointment_date && req.appointment_date >= localToday) ? req.appointment_date : localToday;
+  }
+  if ($("switchApptSlot")) {
+    $("switchApptSlot").value = req.appointment_slot || "10:00 AM - 12:00 PM";
+  }
+
+  openDialog("switchFranchiseModal");
+
+  await loadSwitchDealers(
+    req.brand || "",
+    req.pincode || currentUser?.pincode,
+    req.latitude,
+    req.longitude
+  );
+};
+
+async function submitSwitchFranchise(event) {
+  event.preventDefault();
+  const reqId = $("switchFranchiseRequestId")?.value;
+  const branchId = $("selectedSwitchBranchId")?.value;
+  const reason = $("switchReasonSelect")?.value;
+  const notes = $("switchNotes")?.value?.trim();
+  const prefDate = $("switchApptDate")?.value;
+  const prefSlot = $("switchApptSlot")?.value;
+  const btn = $("confirmSwitchFranchiseBtn");
+  const msgEl = $("switchFranchiseFormMsg");
+
+  if (!reqId || !branchId) {
+    if (msgEl) {
+      msgEl.textContent = "Please select an authorized local franchise partner to continue.";
+      msgEl.classList.remove("hidden");
+    }
+    return;
+  }
+
+  if (msgEl) {
+    msgEl.classList.add("hidden");
+    msgEl.textContent = "";
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span>⏳</span> Switching Route…`;
+  }
+
+  try {
+    const newReq = await readApiJson(`/api/requests/${encodeURIComponent(reqId)}/switch-to-franchise`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        branch_id: branchId,
+        reason: reason || "Company unable to complete service",
+        notes: notes || null,
+        preferred_date: prefDate || null,
+        preferred_slot: prefSlot || null
+      })
+    });
+
+    closeDialog("switchFranchiseModal");
+    showToast(`✓ Ticket switched to local franchise: ${newReq.dealer_shop_name || "Authorized Franchise"}. Company request closed.`, "success");
+    await loadDashboardData();
+    await loadTrackingDetails(newReq.id, newReq);
+    const trackingSec = $("trackingSection");
+    if (trackingSec) {
+      trackingSec.scrollIntoView({ behavior: "smooth" });
+    }
+  } catch (err) {
+    if (msgEl) {
+      msgEl.textContent = err.message || "Failed to switch request to local franchise. Please try again.";
+      msgEl.classList.remove("hidden");
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<span>Confirm & Switch to Franchise</span>`;
+    }
+  }
+}
+
 
 
