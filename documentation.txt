@@ -821,10 +821,11 @@ Request Headers:
   - Body: `{ "branch_id": "br_1", "reason": "Company unable to complete service / parts out of stock", "notes": "Need local 3rd-party part sourcing", "preferred_date": "2026-11-21", "preferred_slot": "01:00 PM - 03:00 PM" }`
   - Access Control: Only the customer who owns the request can switch route.
   - Lifecycle Lock: Rejected with HTTP 400 if request status is `Completed`, `Cancelled`, or `Closed`, or if request is already a franchise route.
-  - Original Request Closure:
-    - Sets `status = "Cancelled"`, `status_badge = "Closed"`.
+  - Original Request Closure (Company OEM Perspective):
+    - In the company portal, this request appears strictly as cancelled/closed by the customer without exposing any franchise details or switch reasons.
+    - Sets `status = "Cancelled"`, `status_badge = "Cancelled"`.
     - Unassigns any company technician (`technician_id = None`).
-    - Appends audit timeline step: *"Closed on Company Side (Switched to Franchise): Customer switched service to local dealer/franchise '{branch_name}'. Reason: {reason}."*
+    - Appends audit timeline step: *"Request Closed by Customer: Customer cancelled and closed this service request."* (Contains zero mention of franchise or local dealer).
   - New Franchise Request Creation:
     - Opens fresh ticket (`SR-xxxx`) assigned to chosen local franchise (`branch_id = payload.branch_id`, `dealer_shop_name = branch.branch_name`).
     - Sets `service_route_preference = "franchise"` and `company_id = None` (strictly isolating it from the Company Portal).
@@ -2500,7 +2501,7 @@ were identified between the initial rough draft documentation and the actual cod
                - Schema `SwitchToFranchisePayload`: Captures `branch_id`, `reason`, optional `notes`, `preferred_date`, and `preferred_slot`.
                - Endpoint `POST /api/requests/{request_id}/switch-to-franchise`:
                  - Guard & Validation: Authenticates customer ownership, validates that the ticket is active (not `Completed`, `Cancelled`, or `Closed`), and confirms it is currently a company route.
-                 - Original Request Closure: Updates `status = "Cancelled"`, `status_badge = "Closed"`, unassigns any technician on company side (`technician_id = None`), and appends an audit event to `timeline_json`: *"Closed on Company Side (Switched to Franchise): Customer switched service to local dealer/franchise '{branch_name}'. Reason: {reason}. Original company ticket closed."*
+                 - Original Request Closure (Company OEM Perspective): Updates `status = "Cancelled"`, `status_badge = "Cancelled"`, unassigns any technician on company side (`technician_id = None`), and appends an audit event to `timeline_json`: *"Request Closed by Customer: Customer cancelled and closed this service request."* This guarantees that in the company portal, the ticket appears strictly as a customer-initiated cancellation, revealing zero information regarding the franchise transfer or chosen dealer shop.
                  - New Franchise Request Creation: Opens a new ticket (`SR-xxxx`), sets `service_route_preference = "franchise"`, `company_id = None` (strictly isolating it from OEM queries), `dealer_shop_name = branch.branch_name`, and `branch_id = branch.id`. Preserves appliance details, issue, address, and defect photo. Generates fresh start and completion OTPs and dispatches booking notifications.
              - Frontend Customer Experience (`frontend/customer-dashboard.html`, `frontend/js/dashboard.js`):
                - Active Request Cards: Renders quick-action button `🔄 Switch to Franchise` on active company request cards.

@@ -1398,18 +1398,18 @@ def switch_request_to_franchise(
     switch_reason = (payload.reason or "Company unable to complete service").strip()
     notes = (payload.notes or "").strip()
 
-    # 1. Close original request on company side
+    # 1. Close original request on company side (Appears strictly as customer-closed in the company portal)
     req.status = "Cancelled"
-    req.status_badge = "Closed"
+    req.status_badge = "Cancelled"
     # Unassign technician on company side if one was assigned
     req.technician_id = None
 
     orig_timeline = json.loads(req.timeline_json) if req.timeline_json else []
     orig_timeline.append({
-        "id": f"switch_closed_{int(datetime.now().timestamp())}",
-        "title": "Closed on Company Side (Switched to Franchise)",
+        "id": f"closed_by_cust_{int(datetime.now().timestamp())}",
+        "title": "Request Closed by Customer",
         "timestamp": now_str,
-        "description": f"Customer switched service to local dealer/franchise '{branch.branch_name}'. Reason: {switch_reason}. Original company ticket closed.",
+        "description": "Customer cancelled and closed this service request.",
         "state": "completed"
     })
     req.timeline_json = json.dumps(orig_timeline)
@@ -1443,7 +1443,7 @@ def switch_request_to_franchise(
     verification_otp = str(random.randint(1000, 9999))
 
     # 4. Construct fresh franchise timeline
-    transfer_desc = f"Service complaint routed to independent local franchise '{branch.branch_name}' (Switched from company ticket {req.id})."
+    transfer_desc = f"Service complaint routed to independent local franchise '{branch.branch_name}'."
     if notes:
         transfer_desc += f" Customer Notes: {notes}"
 
@@ -1485,7 +1485,7 @@ def switch_request_to_franchise(
         }
     ]
 
-    new_desc = f"Transferred from company ticket {req.id}. Customer Reason: {switch_reason}."
+    new_desc = f"Direct Customer Booking. Customer Reason: {switch_reason}."
     if notes:
         new_desc += f" Instructions: {notes}"
     if req.description:
