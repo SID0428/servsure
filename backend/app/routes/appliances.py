@@ -18,13 +18,13 @@ def is_generic_name(name: str | None, brand: str | None = None, category: str | 
     n = name.strip().lower()
     b = (brand or "").strip().lower()
     c = (category or "").strip().lower()
-    if b and c and n == f"{b} {c}":
+    if n in ("other", "appliance", "home appliance", "unknown", "service request"):
         return True
-    if b and n in (f"{b} other", b):
+    if b and n in (b, f"{b} other", f"{b} appliance", f"{b} home appliance"):
         return True
-    if n in ("other", "appliance", "unknown"):
+    if b and c and c == "other" and n in (f"{b} {c}", f"{b} other", f"{b} appliance"):
         return True
-    if n.endswith(" other"):
+    if n.endswith(" other") or n.endswith(" appliance"):
         return True
     return False
 

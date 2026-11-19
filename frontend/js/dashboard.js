@@ -116,7 +116,7 @@ function isGenericTitle(title, brand = "", category = "") {
   const c = (category || "").toLowerCase().trim();
   if (t === "other" || t === "appliance" || t === "home appliance" || t === "service request" || t === "unknown") return true;
   if (b && t === b) return true;
-  if (b && (t === `${b} other` || t.endsWith(" other"))) return true;
+  if (b && (t === `${b} other` || t.endsWith(" other") || t === `${b} appliance` || t.endsWith(" appliance") || t === `${b} home appliance`)) return true;
   if (b && c && t === `${b} ${c}` && c === "other") return true;
   return false;
 }

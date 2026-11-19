@@ -450,15 +450,89 @@ def get_company_branch_details(
     }
 
 
-def resolve_clean_appliance_name(app_obj):
+def is_generic_title(title: str | None, brand: str | None = "", category: str | None = "") -> bool:
+    if not title or not title.strip():
+        return True
+    t = title.strip().lower()
+    b = (brand or "").strip().lower()
+    c = (category or "").strip().lower()
+    if t in ("other", "appliance", "home appliance", "service request", "unknown"):
+        return True
+    if b and (t == b or t == f"{b} other" or t == f"{b} appliance" or t == f"{b} home appliance" or t.endswith(" other") or t.endswith(" appliance")):
+        return True
+    if b and c and c == "other" and t in (f"{b} {c}", f"{b} other", f"{b} appliance"):
+        return True
+    return False
+
+
+def resolve_clean_appliance_name(app_obj, catalog_items=None, service_requests=None) -> str:
     name = (getattr(app_obj, "appliance_name", None) or "").strip()
     brand = (getattr(app_obj, "brand", None) or "").strip()
     category = (getattr(app_obj, "category", None) or "").strip()
-    if name and not name.lower().endswith(" other") and name.lower() != "other" and name.lower() != f"{brand.lower()} other":
+    model = (getattr(app_obj, "model_no", None) or "").strip()
+
+    if name and not is_generic_title(name, brand, category):
         return name
+
+    # 1. Search in catalog_items
+    if catalog_items:
+        if model:
+            for ci in catalog_items:
+                try:
+                    m_list = json.loads(ci.model_numbers) if ci.model_numbers else []
+                except Exception:
+                    m_list = [m.strip() for m in str(ci.model_numbers or "").split(",") if m.strip()]
+                if any(m.strip().lower() == model.lower() for m in m_list):
+                    if ci.appliance_name and not is_generic_title(ci.appliance_name, brand, category):
+                        return ci.appliance_name
+                    if ci.category and ci.category.lower() != "other":
+                        return f"{brand or ci.brand} {ci.category}".strip()
+
+        for ci in catalog_items:
+            ci_brand = (ci.brand or "").strip().lower()
+            ci_comp = getattr(ci, "company_id", None)
+            comp_match = (ci_comp and ci_comp == getattr(app_obj, "company_id", None)) or (ci_brand and brand and ci_brand == brand.lower())
+            if comp_match:
+                if category and category.lower() != "other" and ci.category and ci.category.lower() == category.lower():
+                    if ci.appliance_name and not is_generic_title(ci.appliance_name, brand, category):
+                        return ci.appliance_name
+                elif category and category.lower() == "other":
+                    if ci.category and ci.category.lower() == "other" and ci.appliance_name and not is_generic_title(ci.appliance_name, brand, category):
+                        return ci.appliance_name
+
+    # 2. Search in service_requests
+    if service_requests:
+        app_id = getattr(app_obj, "id", None)
+        for r in service_requests:
+            if (app_id and getattr(r, "appliance_id", None) == app_id) or (model and getattr(r, "model_no", None) and r.model_no.lower() == model.lower()):
+                r_name = (getattr(r, "appliance_name", None) or "").strip()
+                if r_name and not is_generic_title(r_name, brand, category):
+                    return r_name
+
+    # 3. Check matched_policy_name
+    matched_pol = getattr(app_obj, "matched_policy_name", None)
+    if matched_pol:
+        clean_pol = re.sub(r'(?i)\b(standard|warranty|policy|coverage|extended|fy\s*\d{2,4}[-\d]*)\b', '', matched_pol).strip()
+        if clean_pol and not is_generic_title(clean_pol, brand, category):
+            return f"{brand} {clean_pol}".strip() if brand and brand.lower() not in clean_pol.lower() else clean_pol
+
+    # 4. Fallback to Brand + Category if Category is not "Other"
     if category and category.lower() != "other":
-        return f"{brand} {category}".strip()
-    return f"{brand} Appliance".strip() if brand else "Appliance"
+        return f"{brand} {category}".strip() if brand else category
+
+    # 5. Catalog fallback for this brand/company
+    if catalog_items:
+        for ci in catalog_items:
+            ci_brand = (ci.brand or "").strip().lower()
+            ci_comp = getattr(ci, "company_id", None)
+            if (ci_comp and ci_comp == getattr(app_obj, "company_id", None)) or (ci_brand and brand and ci_brand == brand.lower()):
+                if ci.appliance_name and not is_generic_title(ci.appliance_name, brand, category):
+                    return ci.appliance_name
+
+    # 6. Fallback to existing name or Brand Appliance
+    if name and name.strip():
+        return name
+    return f"{brand} Appliance".strip() if brand else "Home Appliance"
 
 
 @router.get("/customers")
@@ -611,13 +685,37 @@ def get_company_customer_details(customer_id: str, request: Request, db: Session
         )
     ).order_by(ApplianceModel.registered_on.desc()).all()
 
+    reqs = db.query(ServiceRequestModel).filter(
+        ServiceRequestModel.customer_id == customer.id,
+        or_(
+            ServiceRequestModel.service_route_preference == "company",
+            ServiceRequestModel.service_route_preference.is_(None)
+        ),
+        ServiceRequestModel.service_route_preference != "franchise",
+        ServiceRequestModel.dealer_shop_name.is_(None),
+        or_(
+            ServiceRequestModel.company_id.in_(comp_ids),
+            ServiceRequestModel.brand.ilike(f"%{brand_clean}%") if brand_clean else False,
+            ServiceRequestModel.brand.ilike(f"%{company_brand}%") if company_brand else False
+        )
+    ).order_by(ServiceRequestModel.created_at.desc()).all()
+
+    catalog_items = db.query(CompanyApplianceCatalogModel).all()
+
     products_list = []
     active_warranties = 0
+    has_healed = False
     for a in appliances:
         is_w_active = (a.warranty_status or "").lower() == "active"
         if is_w_active:
             active_warranties += 1
-        app_name = resolve_clean_appliance_name(a)
+        app_name = resolve_clean_appliance_name(a, catalog_items=catalog_items, service_requests=reqs)
+
+        # Heal generic appliance names in database
+        if is_generic_title(getattr(a, "appliance_name", None), a.brand, a.category) and app_name and not is_generic_title(app_name, a.brand, a.category):
+            a.appliance_name = app_name
+            has_healed = True
+
         products_list.append({
             "id": a.id,
             "appliance_id": a.id,
@@ -638,20 +736,11 @@ def get_company_customer_details(customer_id: str, request: Request, db: Session
             "amc_end_date": a.amc_end_date or "—"
         })
 
-    reqs = db.query(ServiceRequestModel).filter(
-        ServiceRequestModel.customer_id == customer.id,
-        or_(
-            ServiceRequestModel.service_route_preference == "company",
-            ServiceRequestModel.service_route_preference.is_(None)
-        ),
-        ServiceRequestModel.service_route_preference != "franchise",
-        ServiceRequestModel.dealer_shop_name.is_(None),
-        or_(
-            ServiceRequestModel.company_id.in_(comp_ids),
-            ServiceRequestModel.brand.ilike(f"%{brand_clean}%") if brand_clean else False,
-            ServiceRequestModel.brand.ilike(f"%{company_brand}%") if company_brand else False
-        )
-    ).order_by(ServiceRequestModel.created_at.desc()).all()
+    if has_healed:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
 
     ongoing = []
     completed = []

@@ -192,7 +192,7 @@ function isGenericTitle(title, brand = "", category = "") {
   const b = (brand || "").toLowerCase().trim();
   const c = (category || "").toLowerCase().trim();
   if (t === "other" || t === "appliance" || t === "home appliance" || t === "service request" || t === "unknown") return true;
-  if (b && (t === b || t === `${b} other` || t.endsWith(" other"))) return true;
+  if (b && (t === b || t === `${b} other` || t.endsWith(" other") || t === `${b} appliance` || t.endsWith(" appliance") || t === `${b} home appliance`)) return true;
   if (b && c && t === `${b} ${c}` && c === "other") return true;
   return false;
 }
@@ -211,7 +211,7 @@ function getApplianceDisplayName(item) {
   if (typeof companyAppliances !== "undefined" && Array.isArray(companyAppliances) && companyAppliances.length > 0) {
     const matched = companyAppliances.find((a) => {
       if (!a) return false;
-      if (model && (a.model_no === model || a.model === model)) return true;
+      if (model && (a.model_no === model || a.model === model || (Array.isArray(a.model_numbers) && a.model_numbers.some(m => String(m).toLowerCase() === model.toLowerCase())))) return true;
       if (brand && a.brand && a.brand.toLowerCase() === brand.toLowerCase() && a.category && a.category.toLowerCase() !== "other") return true;
       return false;
     });
@@ -3634,7 +3634,7 @@ async function openCompanyCustomerDetail(customerId) {
     if ($("tabCountCustOngoing")) $("tabCountCustOngoing").textContent = (data.ongoing_services || []).length;
     if ($("tabCountCustHistory")) $("tabCountCustHistory").textContent = (data.completed_services || []).length;
 
-    renderCustomerProducts(data.products || []);
+    renderCustomerProducts(data.products || [], [...(data.ongoing_services || []), ...(data.completed_services || [])]);
     renderCustomerOngoing(data.ongoing_services || []);
     renderCustomerHistory(data.completed_services || []);
   } catch (err) {
@@ -3669,7 +3669,7 @@ async function openCompanyCustomerDetail(customerId) {
       if ($("tabCountCustOngoing")) $("tabCountCustOngoing").textContent = ongoing.length;
       if ($("tabCountCustHistory")) $("tabCountCustHistory").textContent = completed.length;
 
-      renderCustomerProducts(prods);
+      renderCustomerProducts(prods, [...ongoing, ...completed]);
       renderCustomerOngoing(ongoing.map((r) => ({
         id: r.id,
         appliance_name: r.appliance_name,
@@ -3699,7 +3699,7 @@ async function openCompanyCustomerDetail(customerId) {
 window.openCompanyCustomerDetail = openCompanyCustomerDetail;
 window.openCustomerDetail = openCompanyCustomerDetail;
 
-function renderCustomerProducts(products) {
+function renderCustomerProducts(products, relatedServices = []) {
   const container = $("custProductsList");
   if (!container) return;
   if (!products || products.length === 0) {
@@ -3717,7 +3717,18 @@ function renderCustomerProducts(products) {
       ? `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-100 text-purple-800 border border-purple-200">🛡️ AMC Active: ${safe(p.amc_plan_name)} (Exp: ${safe(p.amc_end_date)})</span>`
       : `<span class="text-xs text-slate-400 font-medium">Standard OEM Coverage</span>`;
 
-    const displayName = getApplianceDisplayName(p);
+    let displayName = getApplianceDisplayName(p);
+    if (isGenericTitle(displayName, p.brand, p.category) && Array.isArray(relatedServices) && relatedServices.length > 0) {
+      const match = relatedServices.find((s) =>
+        ((s.appliance_id && (s.appliance_id === p.id || s.appliance_id === p.appliance_id)) ||
+         (s.model_no && p.model_no && String(s.model_no).toLowerCase() === String(p.model_no).toLowerCase())) &&
+        s.appliance_name && !isGenericTitle(s.appliance_name, p.brand, p.category)
+      );
+      if (match) {
+        displayName = match.appliance_name;
+      }
+    }
+
     const invoiceBtn = p.invoice_url
       ? `<a href="${safe(resolveMediaUrl(p.invoice_url))}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition shadow-2xs">📄 Purchase Invoice</a>`
       : `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-medium text-slate-400 bg-slate-100">No invoice uploaded</span>`;
@@ -3732,7 +3743,10 @@ function renderCustomerProducts(products) {
               ⚡
             </div>
             <div>
-              <h5 class="text-sm font-bold text-slate-900">${safe(displayName)}</h5>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h5 class="text-sm font-bold text-slate-900">${safe(displayName)}</h5>
+                ${p.category && p.category.toLowerCase() !== "other" && !displayName.toLowerCase().includes(p.category.toLowerCase()) ? `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">${safe(p.category)}</span>` : ""}
+              </div>
               <p class="text-xs text-slate-500">Registered on <span class="font-medium text-slate-700">${safe(p.registered_on || '—')}</span></p>
             </div>
           </div>

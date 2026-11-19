@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.3.0 (Production Release - Company Service Coverage Zones & Franchise Auto-Assignment)
-Last Updated: November 16, 2026 (19:15 IST)
+Version: 2.3.1 (Production Bugfix - Admin & Franchise Portal Clean Appliance Name Resolution)
+Last Updated: November 19, 2026 (13:00 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -681,6 +681,8 @@ Request Headers:
   - Deep-dive technician inspection returning `{ technician, services }` including assigned branch name, parent company name, specialty, contact details, rating, `created_at`, `password_set`, `password_set_at`, and service task list.
 - `GET /api/admin/customers/{customer_id}`:
   - Deep-dive customer inspection returning `{ customer, stats, products, appliances, ongoing_services, completed_services, requests }` across all brands and service requests.
+  - Each item in `products` / `appliances` contains: `id`, `appliance_id`, `appliance_name`, `category`, `brand`, `company_id`, `company_name`, `model_no`, `serial_no`, `registered_on`, `purchase_date`, `invoice_url`, `warranty_status`, `warranty_start_date`, `warranty_end_date`, `is_under_warranty`, `amc_active`, `amc_plan_name`, `amc_end_date`.
+  - Automatically resolves clean appliance names via `resolve_clean_appliance_name` using `CompanyApplianceCatalogModel` and `ServiceRequestModel`, with automatic self-healing of generic database records.
 
 5.3. Brand / Manufacturer Management (`/api/company`)
 -----------------------------------------------------
@@ -2558,6 +2560,36 @@ were identified between the initial rough draft documentation and the actual cod
                 - Zone Dialog Modal (`#zoneDialog` in `company-dashboard.html`): Form for Zone name, State, District, Pincodes textarea, and description.
                 - Franchise Portal (`franchise-dashboard.html`, `renderWelcome`, `renderResources`): Displays operational zone badge in the welcome header (`📍 Zone: <Name> (<District>)`) and in the Service Area resource overview card.
               - Verification: Verified via integration test suite `test_company_zones.py` (10 assertions passing), `python3 -m py_compile`, and `node --check`.
+
+54. BUGFIX: Admin & Franchise Portal Clean Appliance Name Resolution, Purchase Date & Invoice URL Serialization
+    - Initial State / Observed Issue:
+      1. In Admin Portal (`admin-dashboard.html`) under Customer Details Modal (`#companyCustomerDetailModal`), customer appliances were displaying generic titles such as `"gelistra Appliance"` instead of their actual appliance model or catalog name (e.g., `"BUILT-IN-MWO / OVEN & OTG"`).
+      2. The backend route `GET /api/admin/customers/{customer_id}` (`backend/app/routes/admin.py`) and `GET /api/franchise/customers/{customer_id}` (`backend/app/routes/franchise.py`) omitted `appliance_name`, `appliance_id`, `purchase_date`, and `invoice_url` from their serialized `products_list` dictionaries.
+      3. This caused `p.appliance_name`, `p.purchase_date`, and `p.invoice_url` to be undefined on the frontend, resulting in `getApplianceDisplayName(p)` falling back to `${brand} Appliance`, displaying "No invoice uploaded" even when invoices were uploaded, and displaying the registration date instead of purchase date.
+      4. Furthermore, `is_generic_name` in `appliances.py` and `isGenericTitle` in `ops-dashboard.js` and `dashboard.js` did not catch `${brand} Appliance` as a generic title pattern, preventing catalog fallback matching.
+    - Resolution:
+      1. Backend Multi-Tier Appliance Name Resolution & Serialization:
+         - `backend/app/routes/admin.py` & `backend/app/routes/franchise.py`:
+           - Added `is_generic_title` and `resolve_clean_appliance_name(app_obj, catalog_items, service_requests)`.
+           - In `get_admin_customer_details` and `get_franchise_customer_details`, hydrated `products_list` with `appliance_name`, `appliance_id`, `purchase_date`, and `invoice_url`.
+           - Integrated catalog model matching (`CompanyApplianceCatalogModel`), ticket complaint lookup (`ServiceRequestModel`), policy name fallback, and automated self-healing of generic records stored in the database.
+         - `backend/app/routes/company.py`:
+           - Enhanced `resolve_clean_appliance_name` to accept `catalog_items` and `service_requests` for deep catalog and ticket resolution, and enabled database self-healing.
+         - `backend/app/routes/appliances.py`:
+           - Fixed `is_generic_name` so that `${brand} ${category}` is only considered generic if the category is `"other"`.
+           - Added checks for `${brand} appliance` and `appliance` suffix to prevent generic names from bypassing catalog lookup.
+      2. Frontend Display & Multi-Source Cross-Resolution:
+         - `frontend/js/ops-dashboard.js`:
+           - Enhanced `isGenericTitle` to identify `${brand} appliance`, ending with `appliance`, and `${brand} home appliance` as generic titles.
+           - Upgraded `getApplianceDisplayName` with case-insensitive array checking against `model_numbers`.
+           - Updated `openCompanyCustomerDetail` to pass related service tickets into `renderCustomerProducts(products, relatedServices)` so appliances can cross-resolve names from tickets if catalog metadata is missing.
+           - Added category badge display in the product card header when category is distinct from the appliance title.
+         - `frontend/js/dashboard.js`:
+           - Updated `isGenericTitle` to maintain consistency across customer and ops portals.
+      3. Verification:
+         - Verified with `python3 -m py_compile` across all modified Python files.
+         - Verified with `node --check` across all modified JavaScript files.
+         - Tested resolution unit cases across explicit names, generic names with custom model, and category fallbacks.
 
 ==================================================
 End of Documentation
