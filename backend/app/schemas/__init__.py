@@ -144,6 +144,8 @@ class ApplianceBase(BaseModel):
     amc_end_date: Optional[str] = None
     serial_no: Optional[str] = None
     icon: str
+    is_approved: Optional[bool] = False
+    is_added: Optional[bool] = True
     invoice_url: Optional[str] = None
 
     @field_validator("registered_on", "purchase_date", "warranty_start_date", "warranty_end_date", "amc_end_date", mode="before")
@@ -660,6 +662,7 @@ class WarrantyRegistrationVerifyPayload(BaseModel):
     warranty_months: Optional[int] = None
     purchase_date: Optional[str] = None
     notes: Optional[str] = None
+    add_customer: Optional[bool] = False
 
 class WarrantyInvoiceReuploadPayload(BaseModel):
     invoice_url: str
@@ -686,6 +689,8 @@ class WarrantyRegistrationItem(BaseModel):
     warranty_start_date: Optional[str] = None
     warranty_end_date: Optional[str] = None
     warranty_rejection_reason: Optional[str] = None
+    is_approved: Optional[bool] = False
+    is_added: Optional[bool] = True
     matched_policy_id: Optional[str] = None
     matched_policy_name: Optional[str] = None
     policy_code: Optional[str] = None

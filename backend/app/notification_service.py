@@ -559,6 +559,9 @@ def notify_warranty_registration_rejected(app: ApplianceModel, company_name: str
     reason_clean = (rejection_reason or "Invoice verification failed (illegible document or mismatched serial/model)").strip()
     subject = f"Action Required: Warranty Registration Update for {brand_name} {appliance_desc} · ServSure"
 
+    is_added = bool(getattr(app, "is_added", True))
+    added_status_text = "Appliance Added to Account (Warranty Rejected)" if is_added else "Appliance Not Added"
+
     text = f"""Hello {to_name},
 
 Thank you for registering your {brand_name} {appliance_desc} (Model: {app.model_no}) on ServSure.
@@ -569,7 +572,7 @@ Rejection Details:
 - Appliance: {appliance_desc} ({app.model_no})
 - Category: {app.category}
 - Brand: {brand_name}
-- Status: Rejected / Verification Declined
+- Status: {added_status_text}
 - Reason from {company_name}: {reason_clean}
 - Reviewed By: {company_name}
 

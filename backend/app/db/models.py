@@ -152,6 +152,8 @@ class ApplianceModel(Base):
     amc_end_date = Column(String(32), nullable=True)
     serial_no = Column(String(64), nullable=True)
     icon = Column(String(64), default="box")
+    is_approved = Column(Boolean, default=False, nullable=True)
+    is_added = Column(Boolean, default=True, nullable=True)
     invoice_url = Column(Text, nullable=True)
 
 class ServiceRequestModel(Base):

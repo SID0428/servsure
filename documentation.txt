@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.3.1 (Production Bugfix - Admin & Franchise Portal Clean Appliance Name Resolution)
-Last Updated: November 19, 2026 (13:00 IST)
+Version: 2.3.2 (Production Feature - Conditional Customer & Appliance Addition on Warranty Verification Gate)
+Last Updated: November 20, 2026 (12:00 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -382,6 +382,8 @@ All database entities are defined in `backend/app/db/models.py`:
     - `policy_snapshot_json`: Text, Nullable: True (Immutable snapshot of policy coverage at registration/approval).
     - `amc_active`: Boolean, Default: False.
     - `amc_plan_name`, `amc_end_date`: String(64).
+    - `is_approved`: Boolean, Default: False (Company verification gate; true when company approves or accepts addition).
+    - `is_added`: Boolean, Default: True (False when company rejects warranty and selects 'Do Not Add', removing appliance from active customer catalog).
     - `invoice_url`: Text.
 
 11. `ServiceRequestModel` (`service_requests` table):
@@ -723,6 +725,13 @@ Request Headers:
   - Updates appliance details, warranty, and supported model numbers. Cleans and serializes model arrays.
 - `DELETE /api/company/appliances/{appliance_id}`:
   - Deletes appliance item from the company catalog.
+- `GET /api/company/customers`:
+  - Returns customers who have registered appliances belonging to this company.
+  - **Approval Gating**: Customers only appear in this directory once their appliance registration has been explicitly approved (`is_approved == True`) by company admin, or accepted with warranty rejection (`add_customer: true`). Customers with appliances still in `Pending Verification` or rejected with `add_customer: false` are excluded from the company directory.
+  - Returns array of customer records including contact info, location, total products, active warranties, ongoing service jobs, and product summary.
+- `GET /api/company/customers/{customer_id}`:
+  - Returns detailed customer dossier, list of approved company products, and service history.
+  - Enforces approval gate: Returns HTTP 404 if customer has no approved appliances under this company.
 
 
 5.4. Franchise Partner Hub (`/api/franchise`)
@@ -950,10 +959,18 @@ Request Headers:
   - Returns customer appliance warranty registrations queued for the authenticated brand/company.
   - Response: list of `{ id, user_id, customer_name, customer_email, customer_phone, company_id, brand, category, model_no, serial_no, registered_on, purchase_date, warranty_months, warranty_status, warranty_start_date, warranty_end_date, warranty_rejection_reason, invoice_url, matched_policy_id, matched_policy_name, policy_snapshot_json, verified_at, verified_by }`.
 - `POST /api/warranty-amc/registrations/{appliance_id}/verify`:
-  - Body: `{ "action": "approve" | "reject", "warranty_months": 24, "rejection_reason": "...", "notes": "..." }`
+  - Body: `{ "action": "approve" | "reject", "warranty_months": 24, "rejection_reason": "...", "notes": "...", "add_customer": true | false }`
   - Brand OEM review endpoint.
-  - Approve action: Resolves fiscal year policy matched by purchase date, freezes immutable `policy_snapshot_json`, sets `warranty_status = "Active"`, overrides warranty months if specified, recalculates `warranty_start_date` and `warranty_end_date` from purchase date, logs `verified_at` and `verified_by`. Automatically dispatches `notify_warranty_registration_approved` email to the customer with verified certificate details (coverage dates, duration, model, and active terms).
-  - Reject action: Sets `warranty_status = "Rejected"`, records `warranty_rejection_reason` for customer visibility, logs `verified_at` and `verified_by`. Automatically dispatches `notify_warranty_registration_rejected` email to the customer with the company's rejection reason and guidance for uploading clear proof of purchase.
+  - Approve action (`action="approve"`):
+    - Sets `is_approved = True`, `is_added = True`, `warranty_status = "Active"`.
+    - Resolves fiscal year policy matched by purchase date, freezes immutable `policy_snapshot_json`, recalculates `warranty_start_date` and `warranty_end_date`, logs `verified_at` and `verified_by`.
+    - Automatically adds the customer and their approved appliance into the Company's Customers directory (`/api/company/customers`).
+    - Dispatches `notify_warranty_registration_approved` email to the customer with active certificate details.
+  - Reject action (`action="reject"`):
+    - Requires `rejection_reason`. Prompt asks company whether they want to add that customer & appliance or not:
+    - **Branch A (`add_customer: false`, default)**: Sets `warranty_status = "Rejected - Not Added"`, `is_approved = False`, and `is_added = False`. The appliance is **not** added to customer's active appliances catalog (`/api/appliances` excludes it) and the customer is **not** shown in company directory. Company dashboard clearly displays `✕ Rejected - Not Added` with the company rejection reason.
+    - **Branch B (`add_customer: true`)**: Sets `warranty_status = "Rejected"`, `is_approved = True`, and `is_added = True`. The appliance **is** added to the customer's portal displaying that warranty was rejected due to the company reason, and the customer & appliance appear in the company's Customers directory.
+    - Dispatches `notify_warranty_registration_rejected` email reflecting the addition status and company reason.
 - `GET /api/warranty-amc/policies`:
   - Query: `?category=...&is_active=true`
   - Returns company's configured fiscal-year warranty policies with effective date windows and component warranty rules.
@@ -2590,6 +2607,33 @@ were identified between the initial rough draft documentation and the actual cod
          - Verified with `python3 -m py_compile` across all modified Python files.
          - Verified with `node --check` across all modified JavaScript files.
          - Tested resolution unit cases across explicit names, generic names with custom model, and category fallbacks.
+
+  27. [November 20, 2026 - v2.3.2] Conditional Customer & Appliance Addition on Warranty Verification Gate:
+      - Architecture & Business Logic Gating:
+        1. When customers register an appliance for an OEM company, the appliance begins in `warranty_status = "Pending Verification"`.
+        2. Until approved by the company, customers and their pending appliances are strictly excluded from the company's Customers directory (`/api/company/customers` and `/api/company/customers/{id}`).
+        3. Upon Warranty Audit (`POST /api/warranty-amc/registrations/{id}/verify`):
+           - **Approve**: Sets `warranty_status = "Active"`, `is_approved = True`, and `is_added = True`. Customer and appliance are added to the company Customers section.
+           - **Reject with Prompt**: Company is prompted whether they want to add the customer and appliance to their records:
+             - **No (`add_customer: false`)**: Sets `warranty_status = "Rejected - Not Added"`, `is_approved = False`, and `is_added = False`. Appliance is omitted from customer's active appliances catalog (`/api/appliances`), customer is not added to company directory, and company dashboard prominently displays `✕ Rejected - Not Added` with the company rejection reason.
+             - **Yes (`add_customer: true`)**: Sets `warranty_status = "Rejected"`, `is_approved = True`, and `is_added = True`. Appliance is added to customer's portal showing that warranty was rejected due to company reason, and customer appears in company Customers directory.
+      - Database & Model Updates:
+        - Added `is_approved` and `is_added` columns to `ApplianceModel` (`backend/app/db/models.py`).
+        - Added automatic migration and legacy backfill in `seed_database()` (`backend/app/seeds.py`).
+      - Backend Schemas & Routes:
+        - Updated `ApplianceBase`, `WarrantyRegistrationItem`, and `WarrantyRegistrationVerifyPayload` in `backend/app/schemas/__init__.py`.
+        - Updated `get_user_appliances` in `backend/app/routes/appliances.py` to filter out non-added appliances (`is_added == False`).
+        - Updated `list_company_customers` and `get_company_customer_details` in `backend/app/routes/company.py` to enforce the `is_approved == True` gate.
+        - Updated `verify_warranty_registration` in `backend/app/routes/warranty_amc.py` to handle both approval and rejection branching.
+        - Updated `notify_warranty_registration_rejected` in `backend/app/notification_service.py` to reflect addition status in customer notification email.
+      - Frontend Portals:
+        - `frontend/company-dashboard.html`: Added customer inclusion prompt with radio selections (`verifyAddCustomerNo` and `verifyAddCustomerYes`) inside `#warrantyVerificationDialog`.
+        - `frontend/js/ops-dashboard.js`: Passed `add_customer` boolean to verify API, updated toast feedback, and rendered distinct badges in the Registrations subtab for `Rejected - Not Added` vs `Warranty Rejected (Added)` with explicit reasons.
+        - `frontend/js/dashboard.js`: Rendered warranty rejection reason badges on customer home and catalog appliance cards.
+      - Verification:
+        - Compiled all modified Python files with `python3 -m py_compile`.
+        - Checked all modified JavaScript files with `node --check`.
+        - Ran automated 4-tier functional test verifying pending exclusion, reject without add, reject with add, and approve flows.
 
 ==================================================
 End of Documentation

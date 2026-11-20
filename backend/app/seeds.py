@@ -188,6 +188,19 @@ def seed_database(db: Session):
     if "policy_snapshot_json" not in appliance_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE appliances ADD COLUMN policy_snapshot_json TEXT NULL"))
+    if "is_approved" not in appliance_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE appliances ADD COLUMN is_approved BOOLEAN DEFAULT 0"))
+    if "is_added" not in appliance_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE appliances ADD COLUMN is_added BOOLEAN DEFAULT 1"))
+
+    # Backfill legacy records where warranty was already active/approved
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("UPDATE appliances SET is_approved = 1, is_added = 1 WHERE LOWER(warranty_status) IN ('active', 'approved') AND (is_approved IS NULL OR is_approved = 0)"))
+    except Exception:
+        pass
 
     req_columns = {column["name"] for column in inspect(engine).get_columns("service_requests")}
     if "pincode" not in req_columns:

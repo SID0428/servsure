@@ -4836,8 +4836,24 @@ function renderCompanyWarrantyClaims() {
                 statusBadge = `<div><span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">✓ Active (${safe(item.warranty_end_date || '')})</span></div>${polCodeBadge ? `<div class="mt-0.5">${polCodeBadge}</div>` : ''}`;
               } else if (ws.includes("pending")) {
                 statusBadge = `<div><span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">⏳ Pending Verification</span></div>${polCodeBadge ? `<div class="mt-0.5">${polCodeBadge}</div>` : ''}`;
+              } else if (ws.includes("not added") || (ws.includes("reject") && item.is_added === false)) {
+                const rejReason = safe(item.warranty_rejection_reason || "Verification declined");
+                statusBadge = `
+                  <div class="space-y-0.5">
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-300">✕ Rejected - Not Added</span>
+                    <div class="text-[11px] text-rose-700 font-medium leading-tight">Reason: ${rejReason}</div>
+                    <small class="text-slate-400 block text-[10px]">Appliance was not added</small>
+                  </div>
+                `;
               } else if (ws.includes("reject")) {
-                statusBadge = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-800 border border-rose-200" title="${safe(item.warranty_rejection_reason || '')}">✕ Rejected</span>`;
+                const rejReason = safe(item.warranty_rejection_reason || "Verification declined");
+                statusBadge = `
+                  <div class="space-y-0.5">
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300">⚠️ Warranty Rejected (Added)</span>
+                    <div class="text-[11px] text-amber-800 font-medium leading-tight">Reason: ${rejReason}</div>
+                    <small class="text-blue-600 block text-[10px]">Customer & Appliance Added</small>
+                  </div>
+                `;
               } else {
                 statusBadge = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">📄 Invoice Required</span>`;
               }
@@ -5185,6 +5201,8 @@ window.openWarrantyVerificationModal = function (applianceId) {
     $("verifyCustomReason").value = "";
     $("verifyCustomReason").classList.add("hidden");
   }
+  if ($("verifyAddCustomerNo")) $("verifyAddCustomerNo").checked = true;
+  if ($("verifyAddCustomerYes")) $("verifyAddCustomerYes").checked = false;
   if ($("verifyModalMessage")) $("verifyModalMessage").textContent = "";
 
   if (typeof dialog.showModal === "function") dialog.showModal();
@@ -5255,6 +5273,8 @@ function initWarrantyVerificationDialogEvents() {
       return;
     }
 
+    const addCustomer = $("verifyAddCustomerYes")?.checked === true;
+
     const btn = $("verifyRejectBtn");
     btn.disabled = true;
     btn.textContent = "Rejecting…";
@@ -5265,12 +5285,17 @@ function initWarrantyVerificationDialogEvents() {
         method: "POST",
         body: JSON.stringify({
           action: "reject",
-          rejection_reason: reason
+          rejection_reason: reason,
+          add_customer: addCustomer
         })
       });
       if (typeof dialog.close === "function") dialog.close();
       else dialog.hidden = true;
-      showToast("Warranty registration rejected. Customer can re-upload document.", "info");
+      if (addCustomer) {
+        showToast("Warranty rejected, but customer & appliance added to company directory.", "info");
+      } else {
+        showToast("Warranty rejected. Appliance was not added.", "info");
+      }
       await loadCompanyWarrantyClaims();
     } catch (err) {
       if ($("verifyModalMessage")) $("verifyModalMessage").textContent = err.message || "Failed to reject registration.";

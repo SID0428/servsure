@@ -552,6 +552,7 @@ function renderAppliances() {
                   </p>
                   <p class="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
                     ${isWarrantyApproved && policyCode ? `<span class="inline-flex items-center gap-1 font-mono font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded text-[10px] border border-blue-200">Policy: ${escapeHtml(policyCode)}</span>` : ""}
+                    ${(appliance.warranty_status || "").toLowerCase().includes("reject") ? `<span class="inline-flex items-center gap-1 font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded text-[10px] border border-rose-200" title="${escapeHtml(appliance.warranty_rejection_reason || '')}">❌ Warranty Rejected: ${escapeHtml(appliance.warranty_rejection_reason || 'Policy discrepancy')}</span>` : ""}
                     <span>Registered: ${escapeHtml(registeredText)}</span>
                     ${appliance.invoice_url ? `· <a href="${escapeHtml(resolveMediaUrl(appliance.invoice_url))}" target="_blank" rel="noopener noreferrer" class="text-blue-600 font-semibold hover:underline" onclick="event.stopPropagation();">📄 Invoice</a>` : ""}
                   </p>

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
@@ -36,7 +37,10 @@ def get_user_appliances(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Customer access required")
     rows = db.query(ApplianceModel, UserModel.name).outerjoin(
         UserModel, ApplianceModel.company_id == UserModel.id
-    ).filter(ApplianceModel.user_id == user.id).all()
+    ).filter(
+        ApplianceModel.user_id == user.id,
+        or_(ApplianceModel.is_added == True, ApplianceModel.is_added.is_(None))
+    ).all()
 
     catalog_items = db.query(CompanyApplianceCatalogModel).all()
     
@@ -281,6 +285,8 @@ def add_appliance(payload: NewApplianceCreate, request: Request, db: Session = D
         matched_policy_name=matched_pol_name,
         serial_no=payload.serial_no or f"{payload.brand[:3].upper()}-{uuid.uuid4().hex[:6].upper()}",
         icon=icon,
+        is_approved=False,
+        is_added=True,
         invoice_url=inv_url
     )
     db.add(new_app)
@@ -385,6 +391,8 @@ def appliance_payload(appliance: ApplianceModel, company_name: str | None = None
         "amc_end_date": serialize_app_date(appliance.amc_end_date) if hasattr(appliance.amc_end_date, "strftime") else (appliance.amc_end_date or None),
         "serial_no": appliance.serial_no,
         "icon": appliance.icon,
+        "is_approved": bool(getattr(appliance, "is_approved", False)),
+        "is_added": bool(getattr(appliance, "is_added", True) if getattr(appliance, "is_added", None) is not None else True),
         "invoice_url": appliance.invoice_url,
     }
 

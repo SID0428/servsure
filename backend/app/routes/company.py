@@ -551,7 +551,7 @@ def list_company_customers(request: Request, db: Session = Depends(get_db)):
     ).all()
     comp_ids = list(set([c.id for c in matching_companies] + [company.id]))
 
-    # Query all appliances registered for this company, joined with customer UserModel
+    # Query all approved appliances registered for this company, joined with customer UserModel
     rows = (
         db.query(ApplianceModel, UserModel)
         .join(UserModel, ApplianceModel.user_id == UserModel.id)
@@ -560,6 +560,10 @@ def list_company_customers(request: Request, db: Session = Depends(get_db)):
                 ApplianceModel.company_id.in_(comp_ids),
                 ApplianceModel.brand.ilike(f"%{brand_clean}%") if brand_clean else False,
                 ApplianceModel.brand.ilike(f"%{company_brand}%") if company_brand else False,
+            ),
+            or_(
+                ApplianceModel.is_approved == True,
+                ApplianceModel.warranty_status.in_(["Active", "Approved", "active", "approved"])
             )
         )
         .order_by(ApplianceModel.registered_on.desc())
@@ -682,8 +686,15 @@ def get_company_customer_details(customer_id: str, request: Request, db: Session
             ApplianceModel.company_id.in_(comp_ids),
             ApplianceModel.brand.ilike(f"%{brand_clean}%") if brand_clean else False,
             ApplianceModel.brand.ilike(f"%{company_brand}%") if company_brand else False
+        ),
+        or_(
+            ApplianceModel.is_approved == True,
+            ApplianceModel.warranty_status.in_(["Active", "Approved", "active", "approved"])
         )
     ).order_by(ApplianceModel.registered_on.desc()).all()
+
+    if not appliances:
+        raise HTTPException(status_code=404, detail="Customer has no approved appliances under this company.")
 
     reqs = db.query(ServiceRequestModel).filter(
         ServiceRequestModel.customer_id == customer.id,

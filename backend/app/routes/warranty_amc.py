@@ -798,6 +798,8 @@ def list_warranty_registrations(
                 warranty_start_date=app.warranty_start_date,
                 warranty_end_date=app.warranty_end_date,
                 warranty_rejection_reason=getattr(app, "warranty_rejection_reason", None),
+                is_approved=bool(getattr(app, "is_approved", False) or (app.warranty_status and app.warranty_status.lower() in ("active", "approved"))),
+                is_added=bool(getattr(app, "is_added", True) if getattr(app, "is_added", None) is not None else True),
                 matched_policy_id=matched_pol_id,
                 matched_policy_name=matched_pol_name,
                 policy_code=policy_code,
@@ -833,6 +835,8 @@ def verify_warranty_registration(
     if payload.action == "approve":
         app.warranty_status = "Active"
         app.warranty_rejection_reason = None
+        app.is_approved = True
+        app.is_added = True
         app.verified_at = now
         app.verified_by = user.id
 
@@ -905,10 +909,20 @@ def verify_warranty_registration(
             app.policy_snapshot_json = json.dumps(snapshot)
 
     elif payload.action == "reject":
-        app.warranty_status = "Rejected"
-        app.warranty_rejection_reason = payload.rejection_reason or payload.notes or "Invoice verification failed (illegible document or mismatched serial/model)"
         app.verified_at = now
         app.verified_by = user.id
+        app.warranty_rejection_reason = payload.rejection_reason or payload.notes or "Invoice verification failed (illegible document or mismatched serial/model)"
+
+        if payload.add_customer:
+            # Warranty is rejected, but company chose to add customer and appliance
+            app.warranty_status = "Rejected"
+            app.is_approved = True
+            app.is_added = True
+        else:
+            # Warranty is rejected AND company chose NOT to add customer / appliance
+            app.warranty_status = "Rejected - Not Added"
+            app.is_approved = False
+            app.is_added = False
 
     db.commit()
     db.refresh(app)
@@ -929,6 +943,8 @@ def verify_warranty_registration(
         "status": "success",
         "appliance_id": app.id,
         "warranty_status": app.warranty_status,
+        "is_approved": getattr(app, "is_approved", False),
+        "is_added": getattr(app, "is_added", True),
         "warranty_start_date": app.warranty_start_date,
         "warranty_end_date": app.warranty_end_date,
         "warranty_months": app.warranty_months,
