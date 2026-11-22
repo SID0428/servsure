@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.3.4 (Production Feature - Dual Franchise Registration & Service Request Source Segmentation)
-Last Updated: November 22, 2026 (16:50 IST)
+Version: 2.3.5 (Production Feature - Pre-added Company Branch Selection, Branch Codes & Multi-Brand Representation Config in Admin Portal)
+Last Updated: November 22, 2026 (18:25 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -2702,6 +2702,53 @@ were identified between the initial rough draft documentation and the actual cod
         - Python syntax and compilation checked via `python3 -m py_compile`.
         - JavaScript syntax checked via `node --check`.
         - Automated database and model assertions verified schema migration, request detail formatting, and dual user payload creation.
+
+30. PRE-ADDED COMPANY BRANCH SELECTION, BRANCH CODES & FRANCHISE PARTNERSHIP CONFIGURATION (v2.3.5)
+    - Purpose:
+      - Enable platform administrators in the Admin Portal to select branches already registered by OEM companies and configure franchise representation without re-creating conflicting user accounts.
+      - Introduce permanent, memorable branch codes (e.g. `BR-F9812A`) for every branch to facilitate rapid search, tracking, and customer referencing.
+      - Support configuring franchise representation:
+        1. Option A: "Only those which were registered currently" (Exclusive single-brand OEM branch).
+        2. Option B: "Add more company franchises" (Expands the branch into a multi-brand / dual partner franchise representing multiple OEM brands and local dealer requests).
+    - Database & Model Enhancements:
+      - `company_branches` table:
+        - Added `branch_code VARCHAR(32) NULL INDEX` column for fast indexed lookups by branch code.
+        - SQLite auto-migration added in `backend/app/seeds.py` to add `branch_code` column if missing and backfill existing branches with uppercase prefixed codes (`BR-XXXXXX`).
+        - Preserved existing columns `dealer_companies`, `is_dual_registered`, `is_dealer_franchise`, and `registration_mode`.
+    - Backend API Architecture:
+      - `GET /api/admin/preadded-branches`:
+        - Returns all branches registered across companies with parent company name, manager name, contact info, PIN, branch code, and current representation mode.
+      - `POST /api/admin/branches/configure-preadded`:
+        - Payload: `PreaddedBranchConfigure` (`branch_id`, `partnership_mode`, `dealer_companies`, optional manager, mobile, address, pincode).
+        - Configures the pre-added branch without duplicate user account conflict:
+          - When `partnership_mode == "current_only"`: sets `registration_mode = "standard"`, `dealer_companies = None`, `is_dual_registered = False`, `is_dealer_franchise = False`.
+          - When `partnership_mode == "add_more"`: sets `registration_mode = "dual"`, `dealer_companies = ...`, `is_dual_registered = True`, `is_dealer_franchise = True`.
+          - Generates `branch_code` if missing and returns full branch dictionary with `success: true`.
+      - Branch Creation Updates (`/api/company/branches` and `/api/admin/branches`):
+        - Automatically assigns a unique `branch_code` formatted as `BR-{uuid4().hex[:6].upper()}` on creation.
+      - Directory Listings:
+        - `list_directory("branch")` and `list_branches()` include `branch_code` in the returned payloads.
+    - Frontend Implementation:
+      - Dialog Architecture (`frontend/admin-dashboard.html`, `frontend/ops-dashboard.html`):
+        - Enhanced `#branchDialog` with two-mode tab switcher for Admin:
+          - Tab 1: `🏢 Select Pre-added Branch (from Company)`
+          - Tab 2: `➕ Register New Standalone Branch`
+        - Pre-added Branch View:
+          - Search input `#preaddedBranchSearchInput` allowing real-time filtering by Branch Code, Name, Parent Company, or PIN.
+          - Scrollable list `#preaddedBranchesList` showing branch cards with prominent Branch Code badges (`BR-XXXXXX`), parent company, manager, phone, and PIN.
+          - Selection preview panel `#preaddedSelectedBranchPanel` showing selected branch code, company name, manager, and PIN.
+          - Partnership Configuration Radios:
+            - "Only Currently Registered Company" (Exclusive single-brand branch).
+            - "Add More Company Franchises" (Multi-brand franchise representation).
+          - Dynamic Represented Companies multi-select dropdown (`#preaddedCompaniesDropdownWrapper`) for selecting registered brands or adding unregistered brands via "Other".
+      - Script Controller (`frontend/js/ops-dashboard.js`):
+        - `switchBranchDialogMode(mode)` switches between pre-added and standalone tabs and toggles input `required` attributes.
+        - `loadAndRenderPreaddedBranches()` fetches `/api/admin/preadded-branches` and populates the list.
+        - `renderAdminBranches()` and `renderCompanyBranches()` display the Branch Code badge (`<span class="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">BR-...</span>`) and include `branch_code` in table search queries.
+    - Verification:
+      - Syntax check passed: `node --check frontend/js/ops-dashboard.js`.
+      - Python compilation passed: `python3 -m py_compile backend/app/db/models.py backend/app/seeds.py backend/app/schemas/__init__.py backend/app/routes/admin.py backend/app/routes/company.py`.
+      - Automated API test verified pre-added branches query, `current_only` configuration, `add_more` multi-brand configuration, and branch code indexing.
 
 ==================================================
 End of Documentation

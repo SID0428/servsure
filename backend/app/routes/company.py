@@ -104,6 +104,7 @@ def branch_payload(
     z_state = zone.state if zone else None
     return {
         "id": branch.id,
+        "branch_code": getattr(branch, "branch_code", None) or f"BR-{branch.id.replace('branch_', '')[:6].upper()}",
         "branch_name": branch.branch_name,
         "manager_name": branch.manager_name,
         "email": branch.email,
@@ -964,8 +965,10 @@ def create_company_branch(payload: CompanyBranchCreate, request: Request, db: Se
     zone_id = matched_zone.id if matched_zone else None
 
     branch_id = f"branch_{uuid4().hex[:12]}"
+    branch_code = f"BR-{uuid4().hex[:6].upper()}"
     branch = CompanyBranchModel(
         id=branch_id,
+        branch_code=branch_code,
         company_id=company.id,
         branch_name=payload.branch_name.strip(),
         manager_name=payload.manager_name.strip(),

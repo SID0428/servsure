@@ -1,4 +1,5 @@
 import json
+from uuid import uuid4
 from datetime import date
 from sqlalchemy import inspect, text, or_, and_
 from sqlalchemy.orm import Session
@@ -393,6 +394,23 @@ def seed_database(db: Session):
     if "registration_mode" not in branch_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE company_branches ADD COLUMN registration_mode VARCHAR(32) NULL DEFAULT 'standard'"))
+    if "branch_code" not in branch_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE company_branches ADD COLUMN branch_code VARCHAR(32) NULL"))
+
+    # Backfill branch_code for any branches where branch_code is NULL or empty
+    try:
+        branches_needing_code = db.query(CompanyBranchModel).filter(
+            (CompanyBranchModel.branch_code == None) | (CompanyBranchModel.branch_code == "")
+        ).all()
+        for b in branches_needing_code:
+            clean_id = (b.id or "").replace("branch_", "").replace("-", "")
+            code_suffix = clean_id[:6].upper() if clean_id else uuid4().hex[:6].upper()
+            b.branch_code = f"BR-{code_suffix}"
+        if branches_needing_code:
+            db.commit()
+    except Exception:
+        db.rollback()
 
     # Auto-heal legacy appliances where appliance_name is NULL or generic 'brand category' (e.g. 'gelistra Other')
     try:

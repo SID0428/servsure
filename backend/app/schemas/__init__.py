@@ -87,6 +87,15 @@ class CompanyBranchCreate(BaseModel):
     is_dual_registered: Optional[bool] = False
     registration_mode: Optional[str] = None
 
+class PreaddedBranchConfigure(BaseModel):
+    branch_id: str = Field(min_length=1)
+    partnership_mode: str = "current_only" # "current_only" or "add_more"
+    dealer_companies: Optional[str] = None
+    manager_name: Optional[str] = None
+    mobile: Optional[str] = None
+    address: Optional[str] = None
+    pincode: Optional[str] = None
+
 class BranchCredentialsEmail(BaseModel):
     branch_id: str
 

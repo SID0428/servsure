@@ -19,8 +19,10 @@ from app.db.models import (
     JobCardModel, CompanyApplianceCatalogModel
 )
 from app.db.session import get_db
-from app.schemas import AccessTogglePayload, CompanyCreate, CompanyCredentialsEmail, CompanyOtpVerify, CompanyPasswordSetup
-from app.schemas import AccessTogglePayload, CompanyCreate, CompanyCredentialsEmail, CompanyOtpVerify, CompanyPasswordSetup, CompanyBranchCreate
+from app.schemas import (
+    AccessTogglePayload, CompanyCreate, CompanyCredentialsEmail, CompanyOtpVerify,
+    CompanyPasswordSetup, CompanyBranchCreate, PreaddedBranchConfigure
+)
 from app.security import get_authenticated_user, revoke_all_user_sessions
 from app.email_service import send_brevo_email
 
@@ -312,11 +314,11 @@ def list_directory(role: str, request: Request, db: Session = Depends(get_db)):
 
             result.append({
                 "id": b.id,
+                "branch_code": getattr(b, "branch_code", None) or f"BR-{b.id.replace('branch_', '')[:6].upper()}",
                 "name": b.branch_name,
                 "branch_name": b.branch_name,
                 "manager_name": b.manager_name,
                 "company_id": b.company_id,
-                "company_name": company.name if company else "ServSure Network",
                 "company_name": company.name if company else ("Multi-Brand Local Dealer Hub" if getattr(b, "is_dealer_franchise", False) or getattr(b, "dealer_companies", None) else "ServSure Network"),
                 "email": b.email,
                 "phone": b.mobile,
@@ -784,6 +786,7 @@ def create_admin_branch(payload: CompanyBranchCreate, request: Request, db: Sess
         raise HTTPException(status_code=503, detail="Brevo is not configured. Set BREVO_API_KEY and BREVO_SENDER_EMAIL on the backend.")
 
     branch_id = f"branch_{uuid4().hex[:12]}"
+    branch_code = f"BR-{uuid4().hex[:6].upper()}"
     company_id = payload.company_id if payload.company_id else admin.id
     dealer_companies_val = (payload.dealer_companies or "").strip() or None
     is_dealer = bool(payload.is_dealer_franchise or dealer_companies_val or not payload.company_id)
@@ -796,6 +799,7 @@ def create_admin_branch(payload: CompanyBranchCreate, request: Request, db: Sess
 
     branch = CompanyBranchModel(
         id=branch_id,
+        branch_code=branch_code,
         company_id=company_id,
         branch_name=payload.branch_name.strip(),
         manager_name=payload.manager_name.strip(),
@@ -851,6 +855,7 @@ def create_admin_branch(payload: CompanyBranchCreate, request: Request, db: Sess
 
         return {
             "id": branch.id,
+            "branch_code": branch.branch_code,
             "name": branch.branch_name,
             "branch_name": branch.branch_name,
             "manager_name": branch.manager_name,
@@ -878,6 +883,112 @@ def create_admin_branch(payload: CompanyBranchCreate, request: Request, db: Sess
     except Exception:
         db.rollback()
         raise
+
+
+@router.get("/preadded-branches")
+def list_preadded_company_branches(request: Request, db: Session = Depends(get_db)):
+    require_admin(request, db)
+    companies_by_id = {u.id: u for u in db.query(UserModel).filter(UserModel.role == "company").all()}
+    branches = db.query(CompanyBranchModel).order_by(CompanyBranchModel.branch_name).all()
+
+    result = []
+    for b in branches:
+        company = companies_by_id.get(b.company_id)
+        c_name = company.name if company else ("Multi-Brand Local Dealer Hub" if getattr(b, "is_dealer_franchise", False) or getattr(b, "dealer_companies", None) else "Registered Company")
+        b_code = getattr(b, "branch_code", None) or f"BR-{b.id.replace('branch_', '')[:6].upper()}"
+        result.append({
+            "id": b.id,
+            "branch_code": b_code,
+            "branch_name": b.branch_name,
+            "company_id": b.company_id,
+            "company_name": c_name,
+            "manager_name": b.manager_name,
+            "email": b.email,
+            "mobile": b.mobile,
+            "address": b.address,
+            "pincode": b.pincode,
+            "dealer_companies": getattr(b, "dealer_companies", None) or "",
+            "is_dealer_franchise": bool(getattr(b, "is_dealer_franchise", False)),
+            "is_dual_registered": bool(getattr(b, "is_dual_registered", False)),
+            "registration_mode": getattr(b, "registration_mode", None) or "standard",
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+        })
+    return result
+
+
+@router.post("/branches/configure-preadded")
+def configure_preadded_branch(payload: PreaddedBranchConfigure, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    branch = db.query(CompanyBranchModel).filter(CompanyBranchModel.id == payload.branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    company = db.query(UserModel).filter(UserModel.id == branch.company_id).first() if branch.company_id else None
+    company_name = company.name if company else ("Multi-Brand Local Dealer Hub" if getattr(branch, "is_dealer_franchise", False) or getattr(branch, "dealer_companies", None) else "ServSure Network")
+
+    if payload.manager_name and payload.manager_name.strip():
+        branch.manager_name = payload.manager_name.strip()
+    if payload.mobile and payload.mobile.strip():
+        branch.mobile = payload.mobile.strip()
+    if payload.address and payload.address.strip():
+        branch.address = payload.address.strip()
+    if payload.pincode and payload.pincode.strip():
+        branch.pincode = payload.pincode.strip()
+
+    if payload.partnership_mode == "current_only":
+        branch.dealer_companies = None
+        branch.is_dual_registered = False
+        branch.is_dealer_franchise = False
+        branch.registration_mode = "standard"
+    elif payload.partnership_mode == "add_more":
+        dealer_cos = (payload.dealer_companies or "").strip()
+        branch.dealer_companies = dealer_cos if dealer_cos else None
+        branch.is_dual_registered = True
+        branch.is_dealer_franchise = True
+        branch.registration_mode = "dual"
+
+    if not branch.branch_code:
+        clean_id = (branch.id or "").replace("branch_", "").replace("-", "")
+        branch.branch_code = f"BR-{clean_id[:6].upper()}"
+
+    db.commit()
+    db.refresh(branch)
+
+    branch_user = db.query(UserModel).filter((UserModel.id == branch.id) | (UserModel.email == branch.email)).first()
+    onb = db.query(BranchOnboardingModel).filter(BranchOnboardingModel.branch_id == branch.id).first()
+    is_pw_set = bool(onb and onb.password_set_at)
+
+    return {
+        "success": True,
+        "message": f"{branch.branch_name} ({branch.branch_code}) configured successfully.",
+        "branch": {
+            "id": branch.id,
+            "branch_code": branch.branch_code,
+            "name": branch.branch_name,
+            "branch_name": branch.branch_name,
+            "manager_name": branch.manager_name,
+            "company_id": branch.company_id,
+            "company_name": company_name,
+            "email": branch.email,
+            "phone": branch.mobile,
+            "mobile": branch.mobile,
+            "address": branch.address,
+            "pincode": branch.pincode,
+            "dealer_companies": branch.dealer_companies,
+            "is_dealer_franchise": branch.is_dealer_franchise,
+            "is_dual_registered": branch.is_dual_registered,
+            "registration_mode": branch.registration_mode,
+            "is_active": branch_user.is_active if branch_user else False,
+            "password_set": is_pw_set,
+            "password_set_at": onb.password_set_at.isoformat() + "Z" if (onb and onb.password_set_at) else None,
+            "created_at": branch.created_at.isoformat() + "Z" if branch.created_at else None,
+            "total_techs": 0,
+            "total_jobs": 0,
+            "ongoing_jobs": 0,
+            "role": "branch",
+            "avatar": branch.branch_name[:2].upper()
+        }
+    }
 
 
 @router.put("/branches/{branch_id}/access")

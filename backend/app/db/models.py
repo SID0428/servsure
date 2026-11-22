@@ -80,6 +80,7 @@ class CompanyBranchModel(Base):
     is_dealer_franchise = Column(Boolean, nullable=True, default=False)
     is_dual_registered = Column(Boolean, nullable=True, default=False)
     registration_mode = Column(String(32), nullable=True, default="standard")
+    branch_code = Column(String(32), nullable=True, index=True)
     zone_id = Column(String(64), nullable=True, index=True)
 
 class CompanyZoneModel(Base):

@@ -1561,7 +1561,7 @@ function renderCompanyBranches() {
   if ($("bottomSubtitle")) $("bottomSubtitle").textContent = "Branch contacts registered by your company.";
   if ($("requestHead")) $("requestHead").innerHTML = ["Branch", "Franchise owner or manager", "Email", "Mobile number", "Address", "Assigned Zone", "Access Status", "Actions"].map((name) => `<th>${safe(name)}</th>`).join("");
   const query = $("requestSearch") ? $("requestSearch").value.trim().toLowerCase() : "";
-  const filtered = branches.filter((branch) => [branch.branch_name, branch.manager_name, branch.email, branch.mobile, branch.address, branch.pincode, branch.zone_name || "", branch.zone_district || ""].join(" ").toLowerCase().includes(query));
+  const filtered = branches.filter((branch) => [branch.branch_code || "", branch.branch_name, branch.manager_name, branch.email, branch.mobile, branch.address, branch.pincode, branch.zone_name || "", branch.zone_district || ""].join(" ").toLowerCase().includes(query));
   if ($("requestRows")) $("requestRows").innerHTML = filtered.length ? filtered.map((branch) => {
     const isPwSet = Boolean(branch.password_set || branch.password_set_at);
     const isAccessActive = branch.is_active !== false;
@@ -1582,7 +1582,12 @@ function renderCompanyBranches() {
     const action = `<div class="flex items-center gap-1.5"><button type="button" class="table-action font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1" data-view-branch="${safe(branch.id)}">View Details →</button>${toggleBtn}</div>`;
 
     return `<tr class="hover:bg-slate-50/80 cursor-pointer ${isAccessActive ? '' : 'opacity-70 bg-slate-50'}" data-branch-row="${safe(branch.id)}">
-      <td><button type="button" class="font-bold text-slate-900 hover:text-blue-600 text-left" data-view-branch="${safe(branch.id)}">${safe(branch.branch_name)}</button></td>
+      <td>
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <span class="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">${safe(branch.branch_code || ('BR-' + (branch.id || '').replace('branch_', '').slice(0,6).toUpperCase()))}</span>
+          <button type="button" class="font-bold text-slate-900 hover:text-blue-600 text-left" data-view-branch="${safe(branch.id)}">${safe(branch.branch_name)}</button>
+        </div>
+      </td>
       <td>${safe(branch.manager_name)}</td>
       <td>${safe(branch.email)}</td>
       <td>${safe(branch.mobile)}</td>
@@ -6758,7 +6763,7 @@ window.openAdminTechnicianDetail = openAdminTechnicianDetail;
 function renderAdminBranches() {
   $("metricGrid").hidden = true;
   setHidden("addBranchButton", false);
-  $("requestSearch").placeholder = "Search branches by name, manager, parent company, or address";
+  $("requestSearch").placeholder = "Search branches by code, name, manager, parent company, or address";
   $("tableTitle").textContent = "Branches";
   $("tableSubtitle").textContent = "Authorized franchise branch service hubs and local dealer shops across partner brands.";
   $("sidePanelTitle").textContent = "Branch network";
@@ -6768,7 +6773,7 @@ function renderAdminBranches() {
 
   const query = ($("requestSearch")?.value || "").trim().toLowerCase();
   const filtered = directoryRows.filter((item) =>
-    [item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode, item.dealer_companies]
+    [item.branch_code, item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode, item.dealer_companies]
       .join(" ")
       .toLowerCase()
       .includes(query)
@@ -6792,6 +6797,7 @@ function renderAdminBranches() {
         <tr>
           <td>
             <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">${safe(b.branch_code || ('BR-' + (b.id || '').replace('branch_', '').slice(0,6).toUpperCase()))}</span>
               <strong class="text-slate-900 block font-bold">${safe(b.branch_name || b.name)}</strong>
               ${isDealer ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">🏪 Local Dealer Hub</span>' : ''}
             </div>
@@ -9495,11 +9501,12 @@ function initEvents() {
   $("addBranchButton")?.addEventListener("click", async () => {
     if ($("branchFormMessage")) $("branchFormMessage").textContent = "";
     if (role === "admin") {
-      $("dealerCompaniesContainer")?.classList.remove("hidden");
-      resetDealerCompaniesDropdown();
-      await populateDealerCompaniesDropdown();
+      $("branchDialogModeSwitcher")?.classList.remove("hidden");
+      switchBranchDialogMode("preadded");
+      await loadAndRenderPreaddedBranches();
     } else {
-      $("dealerCompaniesContainer")?.classList.add("hidden");
+      $("branchDialogModeSwitcher")?.classList.add("hidden");
+      switchBranchDialogMode("new");
     }
     $("branchDialog")?.showModal();
   });
@@ -9521,8 +9528,8 @@ function initEvents() {
 
   $("closeCompanyDialog")?.addEventListener("click", () => $("companyDialog")?.close());
   $("cancelCompany")?.addEventListener("click", () => $("companyDialog")?.close());
-  $("closeBranchDialog")?.addEventListener("click", () => { resetDealerCompaniesDropdown(); $("branchDialog")?.close(); });
-  $("cancelBranch")?.addEventListener("click", () => { resetDealerCompaniesDropdown(); $("branchDialog")?.close(); });
+  $("closeBranchDialog")?.addEventListener("click", () => { resetDealerCompaniesDropdown(); resetPreaddedBranchState(); $("branchDialog")?.close(); });
+  $("cancelBranch")?.addEventListener("click", () => { resetDealerCompaniesDropdown(); resetPreaddedBranchState(); $("branchDialog")?.close(); });
   $("closeZoneDialog")?.addEventListener("click", closeZoneDialog);
   $("cancelZone")?.addEventListener("click", closeZoneDialog);
   $("closeTechnicianDialog")?.addEventListener("click", () => $("technicianDialog")?.close());
@@ -9897,10 +9904,413 @@ function initEvents() {
   }
   setupDealerCompaniesDropdown();
 
+  // =========================================================================
+  // PRE-ADDED COMPANY BRANCHES & MULTI-BRAND PARTNERSHIP CONFIGURATION (ADMIN)
+  // =========================================================================
+  let activeBranchDialogMode = "preadded"; // "preadded" | "new"
+  let preaddedBranches = [];
+  let selectedPreaddedBranch = null;
+  let preaddedSelectedDealerCompanies = new Set();
+  let isPreaddedDealerOtherActive = false;
+
+  function switchBranchDialogMode(mode) {
+    activeBranchDialogMode = mode;
+    const tabPre = $("tabPreaddedBranch");
+    const tabNew = $("tabNewBranch");
+    const preSection = $("preaddedBranchSection");
+    const newSection = $("newBranchSection");
+    const submitBtn = $("submitBranchBtn") || $("branchForm")?.querySelector('[type="submit"]');
+
+    if (mode === "preadded") {
+      tabPre?.classList.add("bg-white", "text-blue-700", "shadow-xs", "border", "border-blue-100");
+      tabPre?.classList.remove("text-slate-600");
+      tabNew?.classList.remove("bg-white", "text-blue-700", "shadow-xs", "border", "border-blue-100");
+      tabNew?.classList.add("text-slate-600");
+      preSection?.classList.remove("hidden");
+      newSection?.classList.add("hidden");
+      if (submitBtn) submitBtn.textContent = "Save Pre-added Branch Configuration";
+      newSection?.querySelectorAll("input, textarea").forEach((el) => el.removeAttribute("required"));
+    } else {
+      tabNew?.classList.add("bg-white", "text-blue-700", "shadow-xs", "border", "border-blue-100");
+      tabNew?.classList.remove("text-slate-600");
+      tabPre?.classList.remove("bg-white", "text-blue-700", "shadow-xs", "border", "border-blue-100");
+      tabPre?.classList.add("text-slate-600");
+      preSection?.classList.add("hidden");
+      newSection?.classList.remove("hidden");
+      if (submitBtn) submitBtn.textContent = "Save franchise branch";
+      ["branch_name", "manager_name", "email", "mobile", "address", "pincode"].forEach((name) => {
+        newSection?.querySelector(`[name="${name}"]`)?.setAttribute("required", "");
+      });
+      if (role === "admin") {
+        $("dealerCompaniesContainer")?.classList.remove("hidden");
+        resetDealerCompaniesDropdown();
+        populateDealerCompaniesDropdown();
+      } else {
+        $("dealerCompaniesContainer")?.classList.add("hidden");
+      }
+    }
+  }
+
+  async function loadAndRenderPreaddedBranches() {
+    const listContainer = $("preaddedBranchesList");
+    if (!listContainer) return;
+    listContainer.innerHTML = `<div class="text-center py-6 text-xs text-slate-400">Loading pre-added branches…</div>`;
+    try {
+      preaddedBranches = await adminApi("/preadded-branches");
+    } catch (err) {
+      console.error("Failed to fetch preadded branches:", err);
+      preaddedBranches = [];
+    }
+    renderPreaddedBranchesList();
+    await populatePreaddedCompaniesDropdown();
+  }
+
+  function renderPreaddedBranchesList() {
+    const listContainer = $("preaddedBranchesList");
+    if (!listContainer) return;
+    const q = ($("preaddedBranchSearchInput")?.value || "").trim().toLowerCase();
+    const filtered = preaddedBranches.filter((b) => {
+      return [b.branch_code, b.branch_name, b.company_name, b.pincode, b.manager_name, b.email]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+
+    if ($("preaddedCountBadge")) {
+      $("preaddedCountBadge").textContent = `${filtered.length} of ${preaddedBranches.length} branch${preaddedBranches.length === 1 ? '' : 'es'}`;
+    }
+
+    if (filtered.length === 0) {
+      listContainer.innerHTML = `<div class="text-center py-6 text-xs text-slate-400">No pre-added company branches match "${safe(q)}".</div>`;
+      return;
+    }
+
+    listContainer.innerHTML = filtered.map((b) => {
+      const isSelected = selectedPreaddedBranch && selectedPreaddedBranch.id === b.id;
+      return `
+        <div class="preadded-branch-item p-3 rounded-xl border ${isSelected ? 'border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20' : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50/80'} cursor-pointer transition shadow-xs" data-preadded-id="${safe(b.id)}">
+          <div class="flex items-start justify-between gap-2">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-mono text-xs font-black text-blue-700 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-md">${safe(b.branch_code || 'BR-PENDING')}</span>
+                <strong class="text-xs font-bold text-slate-900">${safe(b.branch_name)}</strong>
+                ${b.is_dual_registered ? '<span class="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded-full">Dual Partner</span>' : ''}
+              </div>
+              <div class="text-[11px] text-slate-600">
+                Parent Company: <strong class="text-slate-800">🏢 ${safe(b.company_name || 'OEM Company')}</strong>
+              </div>
+              <div class="text-[11px] text-slate-500">
+                Manager: <span class="font-medium text-slate-700">${safe(b.manager_name || '—')}</span> · 📞 ${safe(b.mobile || '—')} · 📍 PIN: <span class="font-mono font-bold text-slate-700">${safe(b.pincode || '—')}</span>
+              </div>
+            </div>
+            <button type="button" class="shrink-0 text-xs font-semibold px-2.5 py-1 rounded-lg ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-600'}">
+              ${isSelected ? '✓ Selected' : 'Select'}
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    listContainer.querySelectorAll(".preadded-branch-item").forEach((item) => {
+      item.addEventListener("click", () => {
+        const bId = item.getAttribute("data-preadded-id");
+        const branch = preaddedBranches.find((x) => x.id === bId);
+        if (branch) {
+          selectPreaddedBranch(branch);
+        }
+      });
+    });
+  }
+
+  function selectPreaddedBranch(branch) {
+    selectedPreaddedBranch = branch;
+    renderPreaddedBranchesList();
+
+    const panel = $("preaddedSelectedBranchPanel");
+    if (!panel) return;
+    panel.classList.remove("hidden");
+
+    if ($("selectedBranchCodeBadge")) $("selectedBranchCodeBadge").textContent = branch.branch_code || ("BR-" + branch.id.replace("branch_", "").slice(0, 6).toUpperCase());
+    if ($("selectedBranchName")) $("selectedBranchName").textContent = branch.branch_name;
+    if ($("selectedBranchCompany")) $("selectedBranchCompany").textContent = branch.company_name || "ServSure Partner";
+    if ($("selectedBranchManager")) $("selectedBranchManager").textContent = branch.manager_name || "—";
+    if ($("selectedBranchPincode")) $("selectedBranchPincode").textContent = branch.pincode || "—";
+
+    const currentOnlyRadio = document.querySelector('input[name="preadded_partnership_mode"][value="current_only"]');
+    const addMoreRadio = document.querySelector('input[name="preadded_partnership_mode"][value="add_more"]');
+
+    preaddedSelectedDealerCompanies.clear();
+    if (branch.dealer_companies) {
+      const list = branch.dealer_companies.split(",").map((s) => s.trim()).filter(Boolean);
+      list.forEach((c) => preaddedSelectedDealerCompanies.add(c));
+      if (addMoreRadio) addMoreRadio.checked = true;
+      $("preaddedAddMoreContainer")?.classList.remove("hidden");
+    } else {
+      if (currentOnlyRadio) currentOnlyRadio.checked = true;
+      $("preaddedAddMoreContainer")?.classList.add("hidden");
+    }
+    updatePreaddedDealerCompaniesState();
+  }
+
+  function resetPreaddedBranchState() {
+    selectedPreaddedBranch = null;
+    $("preaddedSelectedBranchPanel")?.classList.add("hidden");
+    if ($("preaddedBranchSearchInput")) $("preaddedBranchSearchInput").value = "";
+    preaddedSelectedDealerCompanies.clear();
+    isPreaddedDealerOtherActive = false;
+    const otherChk = $("preaddedCompanyOtherCheckbox");
+    if (otherChk) otherChk.checked = false;
+    const otherCont = $("preaddedOtherInputContainer");
+    if (otherCont) otherCont.classList.add("hidden");
+    const otherInput = $("preaddedOtherCompaniesInput");
+    if (otherInput) otherInput.value = "";
+    const currentOnlyRadio = document.querySelector('input[name="preadded_partnership_mode"][value="current_only"]');
+    if (currentOnlyRadio) currentOnlyRadio.checked = true;
+    $("preaddedAddMoreContainer")?.classList.add("hidden");
+    updatePreaddedDealerCompaniesState();
+  }
+
+  function updatePreaddedDealerCompaniesState() {
+    const chipsContainer = $("preaddedSelectedChips");
+    const placeholder = $("preaddedCompaniesPlaceholder");
+    const otherInput = $("preaddedOtherCompaniesInput");
+
+    const registeredList = Array.from(preaddedSelectedDealerCompanies);
+    let otherList = [];
+    if (isPreaddedDealerOtherActive && otherInput && otherInput.value.trim()) {
+      otherList = otherInput.value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+
+    const allCompanies = [...registeredList, ...otherList];
+
+    if (placeholder) {
+      if (allCompanies.length === 0) {
+        placeholder.textContent = "Select additional companies…";
+        placeholder.className = "truncate text-slate-500";
+      } else {
+        placeholder.textContent = `${allCompanies.length} brand${allCompanies.length > 1 ? "s" : ""} selected (${allCompanies.join(", ")})`;
+        placeholder.className = "truncate text-slate-800 font-semibold";
+      }
+    }
+
+    if (chipsContainer) {
+      chipsContainer.innerHTML = allCompanies
+        .map((comp) => {
+          const isOther = otherList.includes(comp);
+          return `
+            <span class="dealer-chip ${isOther ? 'bg-amber-50 text-amber-800 border-amber-200' : ''}">
+              <span>${safe(comp)}</span>
+              ${isOther ? '<span class="text-[9px] text-amber-600 font-normal">(Other)</span>' : ''}
+              <button type="button" data-remove-preadded-company="${safe(comp)}" aria-label="Remove ${safe(comp)}">✕</button>
+            </span>
+          `;
+        })
+        .join("");
+
+      chipsContainer.querySelectorAll("[data-remove-preadded-company]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const target = btn.getAttribute("data-remove-preadded-company");
+          if (preaddedSelectedDealerCompanies.has(target)) {
+            preaddedSelectedDealerCompanies.delete(target);
+            const chk = $(`preadded_comp_${target.replace(/[^a-zA-Z0-9_-]/g, "_")}`);
+            if (chk) chk.checked = false;
+          } else if (isPreaddedDealerOtherActive && otherInput) {
+            const remaining = otherInput.value
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => s && s.toLowerCase() !== target.toLowerCase());
+            otherInput.value = remaining.join(", ");
+          }
+          updatePreaddedDealerCompaniesState();
+        });
+      });
+    }
+  }
+
+  async function populatePreaddedCompaniesDropdown() {
+    const listContainer = $("preaddedRegisteredCompaniesList");
+    if (!listContainer) return;
+
+    if ((!companies || companies.length === 0) && role === "admin") {
+      try {
+        companies = await adminApi("/companies");
+      } catch {
+        companies = [];
+      }
+    }
+
+    const companyNames = (companies || [])
+      .map((c) => (c.name || c.company_name || "").trim())
+      .filter(Boolean)
+      .filter((name, idx, arr) => arr.indexOf(name) === idx)
+      .sort((a, b) => a.localeCompare(b));
+
+    if (companyNames.length === 0) {
+      listContainer.innerHTML = `<div class="px-2 py-1.5 text-xs text-slate-400">No registered companies available</div>`;
+      return;
+    }
+
+    listContainer.innerHTML = companyNames
+      .map((name) => {
+        const idSafe = `preadded_comp_${name.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+        const isChecked = preaddedSelectedDealerCompanies.has(name);
+        return `
+          <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-xs text-slate-700 preadded-company-row" data-company-name="${safe(name)}">
+            <input type="checkbox" id="${idSafe}" value="${safe(name)}" ${isChecked ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 preadded-company-checkbox">
+            <span class="font-medium text-slate-800">${safe(name)}</span>
+            <span class="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-semibold uppercase tracking-wider">Registered</span>
+          </label>
+        `;
+      })
+      .join("");
+
+    listContainer.querySelectorAll(".preadded-company-checkbox").forEach((chk) => {
+      chk.addEventListener("change", () => {
+        if (chk.checked) {
+          preaddedSelectedDealerCompanies.add(chk.value);
+        } else {
+          preaddedSelectedDealerCompanies.delete(chk.value);
+        }
+        updatePreaddedDealerCompaniesState();
+      });
+    });
+  }
+
+  function setupPreaddedCompaniesDropdown() {
+    const dropdownBtn = $("preaddedCompaniesDropdownBtn");
+    const dropdownMenu = $("preaddedCompaniesMenu");
+    const chev = $("preaddedCompaniesChevron");
+    const otherCheckbox = $("preaddedCompanyOtherCheckbox");
+    const otherContainer = $("preaddedOtherInputContainer");
+    const otherInput = $("preaddedOtherCompaniesInput");
+    const searchInput = $("preaddedCompanySearchInput");
+
+    dropdownBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!dropdownMenu) return;
+      const isClosed = dropdownMenu.classList.toggle("hidden");
+      if (chev) chev.textContent = isClosed ? "▾" : "▴";
+      if (!isClosed && searchInput) {
+        searchInput.focus();
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (dropdownMenu && !dropdownMenu.classList.contains("hidden")) {
+        const wrapper = $("preaddedCompaniesDropdownWrapper");
+        if (wrapper && !wrapper.contains(e.target)) {
+          dropdownMenu.classList.add("hidden");
+          if (chev) chev.textContent = "▾";
+        }
+      }
+    });
+
+    searchInput?.addEventListener("input", () => {
+      const q = searchInput.value.trim().toLowerCase();
+      const rows = $("preaddedRegisteredCompaniesList")?.querySelectorAll(".preadded-company-row");
+      rows?.forEach((row) => {
+        const name = (row.getAttribute("data-company-name") || "").toLowerCase();
+        row.style.display = name.includes(q) ? "" : "none";
+      });
+    });
+
+    otherCheckbox?.addEventListener("change", () => {
+      isPreaddedDealerOtherActive = otherCheckbox.checked;
+      if (isPreaddedDealerOtherActive) {
+        otherContainer?.classList.remove("hidden");
+        otherInput?.focus();
+      } else {
+        otherContainer?.classList.add("hidden");
+        if (otherInput) otherInput.value = "";
+      }
+      updatePreaddedDealerCompaniesState();
+    });
+
+    otherInput?.addEventListener("input", () => {
+      updatePreaddedDealerCompaniesState();
+    });
+
+    $("preaddedBranchSearchInput")?.addEventListener("input", () => {
+      renderPreaddedBranchesList();
+    });
+
+    document.querySelectorAll('input[name="preadded_partnership_mode"]').forEach((radio) => {
+      radio.addEventListener("change", () => {
+        if (radio.value === "add_more") {
+          $("preaddedAddMoreContainer")?.classList.remove("hidden");
+        } else {
+          $("preaddedAddMoreContainer")?.classList.add("hidden");
+        }
+      });
+    });
+
+    $("tabPreaddedBranch")?.addEventListener("click", () => switchBranchDialogMode("preadded"));
+    $("tabNewBranch")?.addEventListener("click", () => switchBranchDialogMode("new"));
+  }
+  setupPreaddedCompaniesDropdown();
+
   $("branchForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
-    const submit = form.querySelector('[type="submit"]');
+    const submit = $("submitBranchBtn") || form.querySelector('[type="submit"]');
+
+    if (role === "admin" && activeBranchDialogMode === "preadded") {
+      if (!selectedPreaddedBranch) {
+        if ($("branchFormMessage")) $("branchFormMessage").textContent = "Please select a pre-added branch from the list above.";
+        return;
+      }
+      if (submit) submit.disabled = true;
+      if ($("branchFormMessage")) $("branchFormMessage").textContent = "Configuring pre-added franchise branch…";
+      const partnershipRadio = document.querySelector('input[name="preadded_partnership_mode"]:checked');
+      const partnershipMode = partnershipRadio ? partnershipRadio.value : "current_only";
+
+      let dealerCompaniesStr = "";
+      if (partnershipMode === "add_more") {
+        const registered = Array.from(preaddedSelectedDealerCompanies);
+        const otherInput = $("preaddedOtherCompaniesInput");
+        let others = [];
+        if (isPreaddedDealerOtherActive && otherInput && otherInput.value.trim()) {
+          others = otherInput.value.split(",").map((s) => s.trim()).filter(Boolean);
+        }
+        dealerCompaniesStr = [...registered, ...others].join(", ");
+      }
+
+      try {
+        const configured = await adminApi("/branches/configure-preadded", {
+          method: "POST",
+          body: JSON.stringify({
+            branch_id: selectedPreaddedBranch.id,
+            partnership_mode: partnershipMode,
+            dealer_companies: dealerCompaniesStr
+          })
+        });
+
+        const branchData = configured.branch || configured;
+        const idx = directoryRows.findIndex((r) => r.id === branchData.id);
+        if (idx >= 0) {
+          directoryRows[idx] = { ...directoryRows[idx], ...branchData };
+        } else {
+          directoryRows.unshift(branchData);
+        }
+        renderAdminBranches();
+        resetPreaddedBranchState();
+        resetDealerCompaniesDropdown();
+        form.reset();
+        $("branchDialog")?.close();
+        showToast(configured.message || `Franchise branch ${branchData.branch_name} (${branchData.branch_code}) configured successfully.`, "success");
+      } catch (error) {
+        if ($("branchFormMessage")) $("branchFormMessage").textContent = error.message;
+      } finally {
+        if (submit) submit.disabled = false;
+      }
+      return;
+    }
+
     if (submit) submit.disabled = true;
     if ($("branchFormMessage")) $("branchFormMessage").textContent = "Saving franchise branch…";
     const payload = Object.fromEntries(new FormData(form).entries());
@@ -9926,6 +10336,8 @@ function initEvents() {
       }
       form.reset();
       resetDealerCompaniesDropdown();
+      resetPreaddedBranchState();
+      $("branchDialog")?.close();
       const zoneNote = created.zone_name ? ` (Auto-assigned to ${created.zone_name})` : "";
       showToast(`${created.branch_name} added${zoneNote}. Franchise setup link sent to ${created.email}.`, "success");
     } catch (error) {
