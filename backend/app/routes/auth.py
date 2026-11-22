@@ -152,6 +152,16 @@ def user_payload(user: UserModel, db: Session = None) -> dict:
                         data["zone_name"] = zone.name
                         data["zone_district"] = zone.district
                         data["zone_state"] = zone.state
+
+                has_company = bool(branch.company_id and company and company.role == "company")
+                has_individual = bool(getattr(branch, "is_dealer_franchise", False) or getattr(branch, "dealer_companies", None))
+                is_explicit_dual = bool(getattr(branch, "is_dual_registered", False) or getattr(branch, "registration_mode", None) == "dual")
+                is_dual = is_explicit_dual or (has_company and has_individual)
+
+                data["is_dual_registered"] = is_dual
+                data["is_dealer_franchise"] = bool(getattr(branch, "is_dealer_franchise", False))
+                data["dealer_companies"] = getattr(branch, "dealer_companies", None)
+                data["registration_mode"] = getattr(branch, "registration_mode", None) or ("dual" if is_dual else ("individual" if has_individual else "company"))
         elif user.role == "technician":
             tech = db.query(TechnicianModel).filter_by(id=user.id).first()
             if not tech:

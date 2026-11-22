@@ -84,6 +84,8 @@ class CompanyBranchCreate(BaseModel):
     dealer_companies: Optional[str] = None
     company_id: Optional[str] = None
     is_dealer_franchise: Optional[bool] = False
+    is_dual_registered: Optional[bool] = False
+    registration_mode: Optional[str] = None
 
 class BranchCredentialsEmail(BaseModel):
     branch_id: str
@@ -313,6 +315,7 @@ class ServiceRequestDetail(BaseModel):
     service_route_preference: Optional[str] = "company"
     dealer_shop_name: Optional[str] = None
     branch_name: Optional[str] = None
+    source_type: Optional[str] = "company"
 
 class ServiceBookingCreate(BaseModel):
     appliance_id: str

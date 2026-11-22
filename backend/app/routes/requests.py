@@ -301,11 +301,12 @@ def format_request_detail(req: ServiceRequestModel, db: Session, user: Optional[
         is_visiting_charge_tax_inclusive=getattr(req, "is_visiting_charge_tax_inclusive", True) if getattr(req, "is_visiting_charge_tax_inclusive", None) is not None else True,
         service_route_preference=getattr(req, "service_route_preference", "company") or "company",
         dealer_shop_name=getattr(req, "dealer_shop_name", None),
-        branch_name=(db.query(CompanyBranchModel.branch_name).filter(CompanyBranchModel.id == req.branch_id).scalar() if req.branch_id else None)
+        branch_name=(db.query(CompanyBranchModel.branch_name).filter(CompanyBranchModel.id == req.branch_id).scalar() if req.branch_id else None),
+        source_type="individual" if (getattr(req, "service_route_preference", None) == "franchise" or bool(getattr(req, "dealer_shop_name", None))) else "company"
     )
 
 @router.get("", response_model=List[ServiceRequestDetail])
-def list_requests(request: Request, db: Session = Depends(get_db)):
+def list_requests(request: Request, source_type: Optional[str] = None, db: Session = Depends(get_db)):
     user = get_authenticated_user(request, db)
     user_id = user.id
     query = db.query(ServiceRequestModel)
@@ -348,6 +349,22 @@ def list_requests(request: Request, db: Session = Depends(get_db)):
             )
         else:
             query = query.filter(ServiceRequestModel.branch_id == user_id)
+
+    if source_type == "company":
+        query = query.filter(
+            or_(
+                ServiceRequestModel.service_route_preference == "company",
+                ServiceRequestModel.service_route_preference.is_(None)
+            ),
+            ServiceRequestModel.dealer_shop_name.is_(None)
+        )
+    elif source_type == "individual":
+        query = query.filter(
+            or_(
+                ServiceRequestModel.service_route_preference == "franchise",
+                ServiceRequestModel.dealer_shop_name.isnot(None)
+            )
+        )
     reqs = query.order_by(ServiceRequestModel.created_at.desc()).all()
     return [format_request_detail(r, db, user=user) for r in reqs]
 

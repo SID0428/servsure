@@ -387,6 +387,12 @@ def seed_database(db: Session):
     if "zone_id" not in branch_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE company_branches ADD COLUMN zone_id VARCHAR(64) NULL"))
+    if "is_dual_registered" not in branch_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE company_branches ADD COLUMN is_dual_registered BOOLEAN DEFAULT 0"))
+    if "registration_mode" not in branch_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE company_branches ADD COLUMN registration_mode VARCHAR(32) NULL DEFAULT 'standard'"))
 
     # Auto-heal legacy appliances where appliance_name is NULL or generic 'brand category' (e.g. 'gelistra Other')
     try:

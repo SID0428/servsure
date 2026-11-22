@@ -131,6 +131,19 @@ let companyTechnicians = [];
 let companyInventorySubTab = "stock"; // "stock" or "requests"
 let franchiseInventorySubTab = "stock"; // "stock", "tech-reqs", "serialized", or "requests"
 let user = initialUser;
+let franchiseRequestSourceFilter = "all"; // "all" | "company" | "individual"
+
+function isFranchiseDual() {
+  if (role !== "franchise" && role !== "branch") return false;
+  if (user?.is_dual_registered || user?.registration_mode === "dual") return true;
+  if (user?.company_id && (user?.is_dealer_franchise || user?.dealer_companies)) return true;
+  const bId = user?.branch_id || user?.id;
+  const b = (branches || []).find(item => item.id === bId);
+  if (b && (b.is_dual_registered || b.registration_mode === "dual" || (b.company_id && (b.is_dealer_franchise || b.dealer_companies)))) {
+    return true;
+  }
+  return false;
+}
 
 const getUserCache = (key, fallback = "[]") => {
   if (!user?.id) return JSON.parse(fallback);
@@ -399,7 +412,16 @@ function safeSessionSet(key, val) {
 }
 
 function getPageFromHash() {
-  const hash = (window.location.hash || "").replace(/^#/, "").trim().toLowerCase();
+  const rawHash = (window.location.hash || "").replace(/^#/, "").trim();
+  const [slugPart, queryPart] = rawHash.split("?");
+  if (queryPart && isFranchiseDual()) {
+    const params = new URLSearchParams(queryPart);
+    const src = params.get("source");
+    if (src === "company" || src === "individual" || src === "all") {
+      franchiseRequestSourceFilter = src;
+    }
+  }
+  const hash = (slugPart || "").toLowerCase();
   const navItems = role === "technician" ? [...config.nav, "Route Map"] : config.nav;
   if (hash) {
     const match = navItems.find((item) => item.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-") === hash);
@@ -412,6 +434,35 @@ function getPageFromHash() {
   return null;
 }
 
+window.setFranchiseRequestSourceFilter = function(filter) {
+  franchiseRequestSourceFilter = filter || "all";
+  const slug = filter === "all" ? "service-requests" : `service-requests?source=${filter}`;
+  if (window.location.hash !== `#${slug}`) {
+    history.replaceState(null, "", `#${slug}`);
+  }
+  document.querySelectorAll(".nav-link").forEach((item) => {
+    item.classList.toggle("active", item.dataset.page === "Service requests");
+  });
+  document.querySelectorAll(".nav-sub-link").forEach((sub) => {
+    const isThisSub = sub.dataset.sourceFilter === filter;
+    sub.classList.toggle("active", isThisSub);
+    sub.classList.toggle("font-bold", isThisSub);
+    if (filter === "company" && isThisSub) {
+      sub.classList.add("text-blue-700", "bg-blue-50/80");
+      sub.classList.remove("text-purple-700", "bg-purple-50/80", "text-slate-600");
+    } else if (filter === "individual" && isThisSub) {
+      sub.classList.add("text-purple-700", "bg-purple-50/80");
+      sub.classList.remove("text-blue-700", "bg-blue-50/80", "text-slate-600");
+    } else {
+      sub.classList.remove("text-blue-700", "bg-blue-50/80", "text-purple-700", "bg-purple-50/80");
+      sub.classList.add("text-slate-600");
+    }
+  });
+  document.querySelector(".ops-sidebar")?.classList.remove("open");
+  safeSessionSet(`servsure_active_page_${role}`, "Service requests");
+  loadWorkspacePageData("Service requests");
+};
+
 function buildNav() {
   const opsNav = $("opsNav");
   if (!opsNav) return;
@@ -421,7 +472,31 @@ function buildNav() {
   opsNav.innerHTML = navItems.map((item) => {
     const slug = item.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-");
     const isActive = item === activePage;
-    return `<a href="#${slug}" data-page="${safe(item)}" class="nav-link ${isActive ? "active" : ""}"><span class="nav-icon">${icons[item] || (item === "Route Map" ? "🗺️" : "•")}</span>${safe(item)}${item === "Service requests" || item === "My jobs" ? `<span class="nav-count">${requests.length}</span>` : ""}</a>`;
+    let subNavHtml = "";
+    if (item === "Service requests" && isFranchiseDual()) {
+      const dualReqs = requests.filter(requestForRole);
+      const compCount = dualReqs.filter(r => r.source_type === "company" || (!r.dealer_shop_name && r.service_route_preference !== "franchise")).length;
+      const indivCount = dualReqs.filter(r => r.source_type === "individual" || Boolean(r.dealer_shop_name) || r.service_route_preference === "franchise").length;
+      subNavHtml = `
+        <div class="nav-sub-items pl-6 pr-2 py-1 space-y-1 my-1 border-l-2 border-blue-400 ml-4">
+          <a href="#service-requests?source=company" data-page="Service requests" data-source-filter="company" class="nav-sub-link ${franchiseRequestSourceFilter === 'company' ? 'active font-bold text-blue-700 bg-blue-50/80 shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'} flex items-center justify-between text-xs py-1.5 px-2 rounded-lg transition">
+            <span class="flex items-center gap-1.5 truncate"><span>🏢</span><span class="truncate">Received from company</span></span>
+            <span class="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded-full ml-1 flex-shrink-0">${compCount}</span>
+          </a>
+          <a href="#service-requests?source=individual" data-page="Service requests" data-source-filter="individual" class="nav-sub-link ${franchiseRequestSourceFilter === 'individual' ? 'active font-bold text-purple-700 bg-purple-50/80 shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'} flex items-center justify-between text-xs py-1.5 px-2 rounded-lg transition">
+            <span class="flex items-center gap-1.5 truncate"><span>🏪</span><span class="truncate">Received individually</span></span>
+            <span class="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded-full ml-1 flex-shrink-0">${indivCount}</span>
+          </a>
+        </div>
+      `;
+    }
+    const reqCount = (role === "franchise" || role === "branch") ? requests.filter(requestForRole).length : requests.length;
+    return `
+      <div class="nav-group-item">
+        <a href="#${slug}" data-page="${safe(item)}" class="nav-link ${isActive ? "active" : ""}"><span class="nav-icon">${icons[item] || (item === "Route Map" ? "🗺️" : "•")}</span>${safe(item)}${item === "Service requests" || item === "My jobs" ? `<span class="nav-count">${reqCount}</span>` : ""}</a>
+        ${subNavHtml}
+      </div>
+    `;
   }).join("");
 
   document.querySelectorAll(".nav-link").forEach((link) => link.addEventListener("click", (event) => {
@@ -431,9 +506,16 @@ function buildNav() {
       window.openTechRouteMap();
       return;
     }
+    if (pageName === "Service requests" && isFranchiseDual()) {
+      franchiseRequestSourceFilter = "all";
+    }
     const slug = pageName.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-");
     document.querySelectorAll(".nav-link").forEach((item) => item.classList.remove("active"));
     link.classList.add("active");
+    document.querySelectorAll(".nav-sub-link").forEach((sub) => {
+      sub.classList.remove("active", "font-bold", "bg-blue-50/80", "bg-purple-50/80", "text-blue-700", "text-purple-700");
+      sub.classList.add("text-slate-600");
+    });
     document.querySelector(".ops-sidebar")?.classList.remove("open");
     safeSessionSet(`servsure_active_page_${role}`, pageName);
     if (window.location.hash !== `#${slug}`) {
@@ -441,6 +523,13 @@ function buildNav() {
     } else {
       loadWorkspacePageData(pageName);
     }
+  }));
+
+  document.querySelectorAll(".nav-sub-link").forEach((subLink) => subLink.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const sourceFilter = subLink.dataset.sourceFilter || "all";
+    window.setFranchiseRequestSourceFilter(sourceFilter);
   }));
 }
 
@@ -672,8 +761,23 @@ function renderAllServiceRequestsView() {
     if (tableEl) tableEl.style.display = "";
     if (techContainer) techContainer.style.display = "none";
   }
-  if ($("tableTitle")) $("tableTitle").textContent = role === "franchise" ? "All Incoming Service Requests" : "All Service Requests";
-  if ($("tableSubtitle")) $("tableSubtitle").textContent = role === "franchise" ? "Track, triage, and coordinate service calls across your territory." : "Complete record of customer service calls across your operations.";
+  if ($("tableTitle")) {
+    if (role === "franchise" && isFranchiseDual()) {
+      if (franchiseRequestSourceFilter === "company") {
+        $("tableTitle").textContent = "Service Requests Received from Company";
+        $("tableSubtitle").textContent = "Requests routed from OEM company dispatch.";
+      } else if (franchiseRequestSourceFilter === "individual") {
+        $("tableTitle").textContent = "Service Requests Received Individually";
+        $("tableSubtitle").textContent = "Requests received directly from local customers & dealer channel.";
+      } else {
+        $("tableTitle").textContent = "All Incoming Service Requests (Dual Franchise)";
+        $("tableSubtitle").textContent = "Review service requests received from company OEM and direct dealer routes.";
+      }
+    } else {
+      $("tableTitle").textContent = role === "franchise" ? "All Incoming Service Requests" : "All Service Requests";
+      $("tableSubtitle").textContent = role === "franchise" ? "Track, triage, and coordinate service calls across your territory." : "Complete record of customer service calls across your operations.";
+    }
+  }
   setHidden("pageContent", false);
   setHidden("metricGrid", false);
   if ($("statusFilter")) $("statusFilter").value = "all";
@@ -7112,12 +7216,79 @@ function priorityClass(priority) {
   return "bg-slate-50 text-slate-700 border border-slate-200";
 }
 
+function renderFranchiseDualFilterTabs(allFranchiseRequests) {
+  if (!isFranchiseDual()) {
+    $("franchiseDualTabsContainer")?.remove();
+    return;
+  }
+
+  const tableEl = $("requestRows")?.closest("table");
+  const panel = tableEl?.closest(".requests-panel") || $("requestRows")?.closest(".panel");
+  if (!panel) return;
+
+  let container = $("franchiseDualTabsContainer");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "franchiseDualTabsContainer";
+    container.className = "franchise-dual-tabs-container border-b border-slate-200 bg-slate-50/90 px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3";
+    const panelHeading = panel.querySelector(".panel-heading");
+    if (panelHeading && panelHeading.nextSibling) {
+      panel.insertBefore(container, panelHeading.nextSibling);
+    } else if (tableEl && tableEl.parentNode) {
+      tableEl.parentNode.insertBefore(container, tableEl);
+    }
+  }
+
+  const totalCount = allFranchiseRequests.length;
+  const companyCount = allFranchiseRequests.filter(item => item.source_type === "company" || (!item.dealer_shop_name && item.service_route_preference !== "franchise")).length;
+  const individualCount = allFranchiseRequests.filter(item => item.source_type === "individual" || Boolean(item.dealer_shop_name) || item.service_route_preference === "franchise").length;
+
+  container.innerHTML = `
+    <div class="flex items-center gap-2 flex-wrap">
+      <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 mr-1 flex items-center gap-1">
+        <span>Dual Route Filter:</span>
+      </span>
+      <button type="button" onclick="window.setFranchiseRequestSourceFilter('all')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${franchiseRequestSourceFilter === 'all' ? 'bg-slate-900 text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'}">
+        <span>All Requests</span>
+        <span class="px-1.5 py-0.2 rounded-full text-[10px] font-bold ${franchiseRequestSourceFilter === 'all' ? 'bg-slate-700 text-slate-100' : 'bg-slate-100 text-slate-600'}">${totalCount}</span>
+      </button>
+      <button type="button" onclick="window.setFranchiseRequestSourceFilter('company')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${franchiseRequestSourceFilter === 'company' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-blue-50 border border-slate-200'}">
+        <span>🏢 Received from Company</span>
+        <span class="px-1.5 py-0.2 rounded-full text-[10px] font-bold ${franchiseRequestSourceFilter === 'company' ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-700'}">${companyCount}</span>
+      </button>
+      <button type="button" onclick="window.setFranchiseRequestSourceFilter('individual')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${franchiseRequestSourceFilter === 'individual' ? 'bg-purple-600 text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-purple-50 border border-slate-200'}">
+        <span>🏪 Received Individually</span>
+        <span class="px-1.5 py-0.2 rounded-full text-[10px] font-bold ${franchiseRequestSourceFilter === 'individual' ? 'bg-purple-700 text-white' : 'bg-purple-100 text-purple-700'}">${individualCount}</span>
+      </button>
+    </div>
+    <div class="text-[11px] text-slate-500 font-medium hidden sm:flex items-center gap-1.5">
+      <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+      <span>Dual Franchise View: OEM Partner & Local Dealer</span>
+    </div>
+  `;
+}
+
 function renderRequests() {
-  const list = requests.filter(requestForRole);
+  const fullList = requests.filter(requestForRole);
+  if (isFranchiseDual()) {
+    renderFranchiseDualFilterTabs(fullList);
+  } else {
+    $("franchiseDualTabsContainer")?.remove();
+  }
+
+  let list = fullList;
+  if (isFranchiseDual()) {
+    if (franchiseRequestSourceFilter === "company") {
+      list = list.filter(item => item.source_type === "company" || (!item.dealer_shop_name && item.service_route_preference !== "franchise"));
+    } else if (franchiseRequestSourceFilter === "individual") {
+      list = list.filter(item => item.source_type === "individual" || Boolean(item.dealer_shop_name) || item.service_route_preference === "franchise");
+    }
+  }
+
   const query = $("requestSearch")?.value ? $("requestSearch").value.trim().toLowerCase() : "";
   const status = $("statusFilter")?.value || "all";
   const filtered = list.filter((item) => {
-    const text = [item.id, item.customer_name, item.appliance_name, item.issue, item.status_badge, item.pincode].join(" ").toLowerCase();
+    const text = [item.id, item.customer_name, item.appliance_name, item.issue, item.status_badge, item.pincode, item.source_type || ""].join(" ").toLowerCase();
     return (!query || text.includes(query)) && (status === "all" || item.status_badge === status);
   });
 
@@ -7420,7 +7591,13 @@ function renderRequests() {
         : '';
 
       const actionCell = `<div class="flex items-center gap-1">${assignBtn}${trackBtn}${detailBtn}${jcBtn}${receiptBtn}</div>`;
-      const reqIdCell = `<span class="cursor-pointer text-blue-600 hover:underline font-mono font-bold" onclick="viewRequestDetails('${safe(item.id)}')">${safe(item.id)}</span>`;
+      const isIndiv = item.source_type === "individual" || Boolean(item.dealer_shop_name) || item.service_route_preference === "franchise";
+      const sourceBadge = isFranchiseDual()
+        ? (isIndiv
+          ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200 mt-1" title="Direct customer or local dealer route">🏪 Received Individually</span>`
+          : `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 mt-1" title="Company OEM routed request">🏢 Received from Company</span>`)
+        : "";
+      const reqIdCell = `<div class="flex flex-col items-start"><span class="cursor-pointer text-blue-600 hover:underline font-mono font-bold" onclick="viewRequestDetails('${safe(item.id)}')">${safe(item.id)}</span>${sourceBadge}</div>`;
       const cells = [reqIdCell, customer, safe(item.appliance_name), safe(item.issue), techCell, priorityBadge, statusPill, actionCell];
       return `<tr>${cells.map((cell) => `<td>${cell}</td>`).join("")}</tr>`;
     }
@@ -7444,7 +7621,12 @@ function renderRequests() {
     return `<tr class="cursor-pointer hover:bg-blue-50/40 transition" onclick="viewRequestDetails('${safe(item.id)}')">${cells.map((cell) => `<td>${cell}</td>`).join("")}</tr>`;
   }).join("") : `<tr><td class="empty-row" colspan="${head.length}">No service requests match this view.</td></tr>`;
 
-  if ($("requestCount")) $("requestCount").textContent = `${filtered.length} request${filtered.length === 1 ? "" : "s"} shown`;
+  if ($("requestCount")) {
+    const filterNote = (isFranchiseDual() && franchiseRequestSourceFilter !== "all")
+      ? ` (${franchiseRequestSourceFilter === "company" ? "🏢 Company OEM" : "🏪 Received Individually"})`
+      : "";
+    $("requestCount").textContent = `${filtered.length} request${filtered.length === 1 ? "" : "s"} shown${filterNote}`;
+  }
   document.querySelectorAll("[data-request]").forEach((button) => button.addEventListener("click", () => showToast(`${button.dataset.request} · ${requests.find((r) => r.id === button.dataset.request)?.issue || "Service request"}`)));
 }
 
@@ -9722,6 +9904,15 @@ function initEvents() {
     if (submit) submit.disabled = true;
     if ($("branchFormMessage")) $("branchFormMessage").textContent = "Saving franchise branch…";
     const payload = Object.fromEntries(new FormData(form).entries());
+    if (payload.registration_mode === "dual") {
+      payload.is_dual_registered = true;
+    } else if (payload.registration_mode === "dealer") {
+      payload.is_dual_registered = false;
+      payload.is_dealer_franchise = true;
+    } else if (payload.registration_mode === "standard") {
+      payload.is_dual_registered = false;
+      payload.is_dealer_franchise = false;
+    }
     try {
       const created = role === "admin"
         ? await adminApi("/branches", { method: "POST", body: JSON.stringify(payload) })

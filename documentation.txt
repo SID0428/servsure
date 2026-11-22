@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.3.3 (Production Feature - Brand Logo Integration Across Website Portals & Favicons)
-Last Updated: November 22, 2026 (16:05 IST)
+Version: 2.3.4 (Production Feature - Dual Franchise Registration & Service Request Source Segmentation)
+Last Updated: November 22, 2026 (16:50 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -2658,6 +2658,50 @@ were identified between the initial rough draft documentation and the actual cod
       - Verification:
         - Verified Python files with `python3 -m py_compile`.
         - Verified JavaScript files with `node --check`.
+
+  29. [November 22, 2026 - v2.3.4] Dual Franchise Registration & Service Request Source Segmentation:
+      - Overview & Business Problem:
+        - When a franchise branch functions in dual mode (both authorized by a brand company OEM and registered independently as a local dealer/multi-brand hub), incoming service requests originate from two separate channels:
+          1. Company OEM Channel: Dispatched from brand companies or OEM routing algorithms.
+          2. Individual/Dealer Channel: Booked directly by local walk-in customers or routed to the branch via direct dealer preference (`service_route_preference == "franchise"` or `dealer_shop_name`).
+        - The franchise portal now provides dedicated sub-options and filter views under "Service requests" to differentiate between requests received from the company and requests received individually.
+      - Database Model & Schema Enhancements:
+        - `CompanyBranchModel` (`backend/app/db/models.py`):
+          - `is_dual_registered`: Boolean flag (default: False) indicating whether the branch is dual registered.
+          - `registration_mode`: String(32) indicating branch registration mode: `"dual"`, `"standard"` (company branch only), or `"dealer"` (individual local dealer only).
+        - Schema & Migration (`backend/app/schemas/__init__.py`, `backend/app/seeds.py`):
+          - Added `is_dual_registered` and `registration_mode` to `CompanyBranchCreate` and admin branch endpoints.
+          - Added auto-migration in `seed_database()` to execute `ALTER TABLE company_branches ADD COLUMN` if missing in SQLite.
+        - Request Formatting (`backend/app/routes/requests.py`):
+          - `format_request_detail()` computes `source_type`:
+            - `"individual"` if `service_route_preference == "franchise"` or `dealer_shop_name` is present.
+            - `"company"` otherwise (dispatched from brand OEM).
+          - `GET /api/requests` accepts query parameter `source_type` ("company" or "individual") to allow backend-level query filtering alongside branch and role security.
+      - Authentication & User Context (`backend/app/routes/auth.py`):
+        - Updated `user_payload()` for franchise/branch accounts:
+          - Automatically determines dual status: `branch.is_dual_registered` or `branch.registration_mode == "dual"` or (`branch.company_id` and (`branch.is_dealer_franchise` or `branch.dealer_companies`)).
+          - Exposes `user.is_dual_registered` (boolean) and `user.registration_mode` in auth responses and session storage.
+      - Frontend Interface & Dual Navigation (`frontend/js/ops-dashboard.js`):
+        - Sub-Navigation in Sidebar:
+          - When a logged-in franchise is dual registered (`isFranchiseDual()`), the "Service requests" sidebar item displays sub-navigation options:
+            - `↳ Received from Company` (`#service-requests?source=company`, badge count of company requests).
+            - `↳ Received Individually` (`#service-requests?source=individual`, badge count of individual requests).
+          - Clicking either sub-option applies `franchiseRequestSourceFilter` ("company" or "individual"), updates active styling, and triggers `renderRequests()`.
+        - Segmented Dual Tabs & Badges:
+          - On the Service Requests view, rendered segmented pill buttons above the table:
+            - `All Requests` (total count).
+            - `🏢 Received from Company` (company count).
+            - `🏪 Received Individually` (individual count).
+          - Added visual source badges to each table row in franchise view:
+            - `🏢 Received from Company` (blue badge) for OEM requests.
+            - `🏪 Received Individually` (purple badge) for direct/dealer requests.
+          - Dynamic table titles ("Service Requests Received from Company" / "Service Requests Received Individually") for instant clarity.
+        - Directory Dialogs (`frontend/ops-dashboard.html`, `frontend/admin-dashboard.html`):
+          - Added "Franchise registration mode" selector in `#branchDialog` to allow admins and company operators to create branches as Dual Registered, Standard Company Branch, or Individual Local Dealer Shop.
+      - Verification:
+        - Python syntax and compilation checked via `python3 -m py_compile`.
+        - JavaScript syntax checked via `node --check`.
+        - Automated database and model assertions verified schema migration, request detail formatting, and dual user payload creation.
 
 ==================================================
 End of Documentation

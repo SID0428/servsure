@@ -325,6 +325,8 @@ def list_directory(role: str, request: Request, db: Session = Depends(get_db)):
                 "pincode": b.pincode,
                 "dealer_companies": getattr(b, "dealer_companies", None),
                 "is_dealer_franchise": bool(getattr(b, "is_dealer_franchise", False)),
+                "is_dual_registered": bool(getattr(b, "is_dual_registered", False) or getattr(b, "registration_mode", None) == "dual" or (b.company_id and company and company.role == "company" and (getattr(b, "is_dealer_franchise", False) or getattr(b, "dealer_companies", None)))),
+                "registration_mode": getattr(b, "registration_mode", None) or ("dual" if bool(getattr(b, "is_dual_registered", False) or (b.company_id and company and company.role == "company" and (getattr(b, "is_dealer_franchise", False) or getattr(b, "dealer_companies", None)))) else ("individual" if getattr(b, "is_dealer_franchise", False) else "company")),
                 "is_active": getattr(b_user, "is_active", False) if b_user else False,
                 "password_set": pw_set,
                 "password_set_at": pw_set_at,
@@ -785,6 +787,12 @@ def create_admin_branch(payload: CompanyBranchCreate, request: Request, db: Sess
     company_id = payload.company_id if payload.company_id else admin.id
     dealer_companies_val = (payload.dealer_companies or "").strip() or None
     is_dealer = bool(payload.is_dealer_franchise or dealer_companies_val or not payload.company_id)
+    reg_mode = (payload.registration_mode or "").strip().lower()
+    is_dual = bool(payload.is_dual_registered or reg_mode == "dual" or (payload.company_id and (is_dealer or dealer_companies_val)))
+    if is_dual:
+        reg_mode = "dual"
+    elif not reg_mode:
+        reg_mode = "individual" if is_dealer else "company"
 
     branch = CompanyBranchModel(
         id=branch_id,
@@ -797,6 +805,8 @@ def create_admin_branch(payload: CompanyBranchCreate, request: Request, db: Sess
         pincode=payload.pincode.strip(),
         dealer_companies=dealer_companies_val,
         is_dealer_franchise=is_dealer,
+        is_dual_registered=is_dual,
+        registration_mode=reg_mode,
         created_at=datetime.utcnow(),
     )
     branch_user = UserModel(
@@ -853,6 +863,8 @@ def create_admin_branch(payload: CompanyBranchCreate, request: Request, db: Sess
             "pincode": branch.pincode,
             "dealer_companies": branch.dealer_companies,
             "is_dealer_franchise": branch.is_dealer_franchise,
+            "is_dual_registered": branch.is_dual_registered,
+            "registration_mode": branch.registration_mode,
             "is_active": False,
             "password_set": False,
             "password_set_at": None,

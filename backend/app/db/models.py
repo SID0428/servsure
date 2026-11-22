@@ -78,6 +78,8 @@ class CompanyBranchModel(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     dealer_companies = Column(Text, nullable=True)
     is_dealer_franchise = Column(Boolean, nullable=True, default=False)
+    is_dual_registered = Column(Boolean, nullable=True, default=False)
+    registration_mode = Column(String(32), nullable=True, default="standard")
     zone_id = Column(String(64), nullable=True, index=True)
 
 class CompanyZoneModel(Base):
