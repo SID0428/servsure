@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.3.2 (Production Feature - Conditional Customer & Appliance Addition on Warranty Verification Gate)
-Last Updated: November 21, 2026 (08:15 IST)
+Version: 2.3.3 (Production Feature - Brand Logo Integration Across Website Portals & Favicons)
+Last Updated: November 22, 2026 (16:05 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -2634,6 +2634,30 @@ were identified between the initial rough draft documentation and the actual cod
         - Compiled all modified Python files with `python3 -m py_compile`.
         - Checked all modified JavaScript files with `node --check`.
         - Ran automated 4-tier functional test verifying pending exclusion, reject without add, reject with add, and approve flows.
+
+  28. [November 22, 2026 - v2.3.3] Official ServSure Brand Logo Integration Across All Website Portals & Favicons:
+      - Asset Placements:
+        1. Added high-resolution brand logo asset `logo.jpeg` to root, `frontend/logo.jpeg`, and `app/static/logo.jpeg`.
+      - Frontend Stylesheets:
+        - `frontend/css/style.css`: Added `.brand-logo-img` with rounded corners, subtle brand drop shadow, and aspect-ratio preservation; updated `.brand-mark` with `overflow: hidden` and image child support.
+        - `frontend/css/ops-dashboard.css`: Added `.ops-brand-logo` and `.ops-brand-mark img` styling for clean sidebar alignment.
+        - `frontend/css/company-setup.css`: Added `.brand-logo-img` and `.brand-mark img` styling.
+      - Frontend Portals & HTML Templates:
+        - Favicons: Embedded `<link rel="icon" type="image/jpeg" href="./logo.jpeg">` (or `/static/logo.jpeg`) in `<head>` across all portals.
+        - Customer & Auth Portals:
+          - `frontend/index.html`: Replaced text initials in desktop brand panel and mobile header with `<img src="./logo.jpeg" alt="ServSure Logo" class="brand-logo-img">`.
+          - `frontend/admin-login.html`, `frontend/company-login.html`, `frontend/franchise-login.html`, `frontend/technician-login.html`: Replaced text initials with official logo image.
+          - `frontend/company-setup.html`, `frontend/franchise-setup.html`, `frontend/technician-setup.html`: Replaced brand mark text with official logo image.
+          - `frontend/customer-dashboard.html`: Integrated logo in desktop sidebar header (`w-10 h-10`), mobile top sticky bar (`w-8 h-8`), and mobile drawer (`w-9 h-9`).
+        - Operations Portals:
+          - `frontend/ops-dashboard.html`, `frontend/company-dashboard.html`, `frontend/franchise-dashboard.html`, `frontend/technician-dashboard.html`, `frontend/admin-dashboard.html`: Updated sidebar brand mark to render official logo image.
+        - Core Templates:
+          - `app/templates/base.html`: Added favicon link.
+          - `app/templates/login.html`: Replaced placeholder icon with official logo image.
+          - `app/templates/dashboard.html`: Replaced placeholder icon with official logo image.
+      - Verification:
+        - Verified Python files with `python3 -m py_compile`.
+        - Verified JavaScript files with `node --check`.
 
 ==================================================
 End of Documentation
