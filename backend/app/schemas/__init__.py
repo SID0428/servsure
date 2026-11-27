@@ -422,9 +422,23 @@ class UserProfileUpdate(BaseModel):
 class FranchiseAssignPayload(BaseModel):
     technician_id: str
     request_id: Optional[str] = None
+    request_ids: Optional[List[str]] = None
     priority: Optional[str] = None
     reassign_mode: Optional[str] = None # "same_technician" or "new_technician"
     reassign_notes: Optional[str] = None
+
+class BatchAssignPayload(BaseModel):
+    technician_id: str = Field(min_length=1, description="Selected technician ID")
+    request_ids: List[str] = Field(min_length=1, description="List of service request IDs to assign")
+    priority: Optional[str] = Field(default="Medium", description="Priority to assign")
+
+class BatchAssignResponse(BaseModel):
+    success: bool
+    assigned_count: int
+    failed_count: int = 0
+    technician_id: str
+    technician_name: str
+    requests: List[ServiceRequestDetail]
 
 class TechnicianActionPayload(BaseModel):
     action: str # "accept", "start_visit", "start_service", "complete"

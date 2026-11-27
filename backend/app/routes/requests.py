@@ -48,6 +48,8 @@ from app.schemas import (
     TechnicianBase,
     TimelineStep,
     FranchiseAssignPayload,
+    BatchAssignPayload,
+    BatchAssignResponse,
     TechnicianActionPayload,
     TechnicianLocationPayload,
     JobCardPartItem,
@@ -1570,6 +1572,104 @@ def switch_request_to_franchise(
         print(f"Notification error on switch to franchise: {notify_err}")
 
     return format_request_detail(new_req, db, user=user)
+
+@router.post("/batch-assign", response_model=BatchAssignResponse)
+def batch_assign_technician(payload: BatchAssignPayload, request: Request, db: Session = Depends(get_db)):
+    try:
+        user = get_authenticated_user(request, db)
+    except HTTPException:
+        user = None
+
+    if user and user.role not in ("branch", "franchise", "company", "admin"):
+        raise HTTPException(status_code=403, detail="Not authorized to assign technicians")
+
+    if not payload.request_ids:
+        raise HTTPException(status_code=400, detail="No request IDs provided for assignment")
+
+    tech = db.query(TechnicianModel).filter(
+        or_(TechnicianModel.id == payload.technician_id, TechnicianModel.name == payload.technician_id)
+    ).first()
+    if not tech:
+        u = db.query(UserModel).filter(
+            or_(UserModel.id == payload.technician_id, UserModel.name == payload.technician_id)
+        ).first()
+        if u:
+            tech = db.query(TechnicianModel).filter(
+                or_(TechnicianModel.id == u.id, TechnicianModel.name == u.name)
+            ).first()
+
+    if not tech:
+        tech = db.query(TechnicianModel).first()
+
+    if not tech:
+        raise HTTPException(status_code=404, detail="Technician not found")
+
+    reqs = db.query(ServiceRequestModel).filter(ServiceRequestModel.id.in_(payload.request_ids)).all()
+    if not reqs:
+        raise HTTPException(status_code=404, detail="None of the specified service requests were found")
+
+    now_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    updated_reqs = []
+
+    for req in reqs:
+        # Safeguard: Do not reassign completed or cancelled requests unless they are flagged as reopened
+        if req.status in ("Completed", "Cancelled") and not getattr(req, "is_reopened", False):
+            continue
+
+        if user and user.role == "company":
+            if req.service_route_preference == "franchise" or req.dealer_shop_name:
+                continue
+
+        req.technician_id = tech.id
+        if payload.priority:
+            req.priority = payload.priority
+
+        if getattr(req, "is_reopened", False):
+            if req.previous_technician_id and tech.id == req.previous_technician_id:
+                assignment_desc = f"Reassigned to original technician {tech.name} ({tech.title}) for revisit"
+            elif req.previous_technician_name:
+                assignment_desc = f"Reassigned to new technician {tech.name} ({tech.title}) (Previously serviced by {req.previous_technician_name})"
+            else:
+                assignment_desc = f"Reassigned to technician {tech.name} ({tech.title}) for revisit"
+        else:
+            assignment_desc = f"Assigned to {tech.name} ({tech.title})"
+
+        timeline = json.loads(req.timeline_json) if req.timeline_json else []
+        for step in timeline:
+            if step.get("id") == "step_2":
+                step["state"] = "completed"
+                step["timestamp"] = now_str
+                step["description"] = assignment_desc
+            elif step.get("id") == "step_3":
+                step["state"] = "current"
+                step["timestamp"] = None
+                step["description"] = "Technician notified; ready for dispatch"
+            elif step.get("id") in ("step_4", "step_5"):
+                step["state"] = "pending"
+                step["timestamp"] = None
+
+        req.timeline_json = json.dumps(timeline)
+        req.status = "Technician Assigned"
+        req.status_badge = "Scheduled"
+        updated_reqs.append(req)
+
+    db.commit()
+
+    for req in updated_reqs:
+        db.refresh(req)
+        try:
+            notify_technician_assigned(req, tech, db)
+        except Exception as notify_err:
+            print(f"Error notifying technician for batch assigned request {req.id}: {notify_err}")
+
+    return BatchAssignResponse(
+        success=True,
+        assigned_count=len(updated_reqs),
+        failed_count=len(payload.request_ids) - len(updated_reqs),
+        technician_id=tech.id,
+        technician_name=tech.name,
+        requests=[format_request_detail(r, db, user=user) for r in updated_reqs]
+    )
 
 @router.post("/{request_id}/assign", response_model=ServiceRequestDetail)
 def assign_technician(request_id: str, payload: FranchiseAssignPayload, request: Request, db: Session = Depends(get_db)):

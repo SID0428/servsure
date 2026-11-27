@@ -106,6 +106,111 @@ let config = roleConfig[role] || roleConfig.company;
 const $ = (id) => document.getElementById(id);
 const setHidden = (id, hidden) => { const el = $(id); if (el) el.hidden = Boolean(hidden); };
 let requests = [];
+let selectedBatchRequestIds = new Set();
+let batchAssignMode = "single"; // "single" or "multiple"
+
+window.toggleSelectAllRequests = function(masterChecked) {
+  const visible = requests.filter(requestForRole);
+  const pending = visible.filter(r => r.status_badge !== "Completed" && r.status !== "Cancelled");
+  if (masterChecked) {
+    pending.forEach(r => selectedBatchRequestIds.add(r.id));
+  } else {
+    selectedBatchRequestIds.clear();
+  }
+  window.updateBatchSelectionUI();
+};
+
+window.toggleRequestSelection = function(requestId, checked) {
+  if (checked) {
+    selectedBatchRequestIds.add(requestId);
+  } else {
+    selectedBatchRequestIds.delete(requestId);
+  }
+  window.updateBatchSelectionUI();
+};
+
+window.clearSelectedBatchRequests = function() {
+  selectedBatchRequestIds.clear();
+  window.updateBatchSelectionUI();
+};
+
+window.selectAllUnassignedForBatch = function() {
+  const visible = requests.filter(requestForRole);
+  const unassigned = visible.filter(r => r.status_badge !== "Completed" && r.status !== "Cancelled" && !r.technician_id && !r.technician?.name);
+  unassigned.forEach(r => selectedBatchRequestIds.add(r.id));
+  window.updateBatchSelectionUI();
+};
+
+window.setBatchAssignMode = function(mode) {
+  batchAssignMode = mode;
+  renderInsights();
+};
+
+window.openBatchAssignMode = function() {
+  batchAssignMode = "multiple";
+  renderInsights();
+  const panel = $("healthContent");
+  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+
+window.updateBatchSelectionUI = function() {
+  document.querySelectorAll(".request-row-checkbox").forEach(cb => {
+    cb.checked = selectedBatchRequestIds.has(cb.value);
+  });
+  document.querySelectorAll(".panel-req-checkbox").forEach(cb => {
+    cb.checked = selectedBatchRequestIds.has(cb.value);
+  });
+
+  const masterCb = document.getElementById("selectAllReqCheckbox");
+  if (masterCb) {
+    const visible = requests.filter(requestForRole);
+    const pending = visible.filter(r => r.status_badge !== "Completed" && r.status !== "Cancelled");
+    masterCb.checked = pending.length > 0 && pending.every(r => selectedBatchRequestIds.has(r.id));
+    masterCb.indeterminate = selectedBatchRequestIds.size > 0 && !masterCb.checked;
+  }
+
+  let bulkBar = document.getElementById("requestsBulkActionBar");
+  if (selectedBatchRequestIds.size > 0) {
+    if (!bulkBar) {
+      bulkBar = document.createElement("div");
+      bulkBar.id = "requestsBulkActionBar";
+      bulkBar.className = "sticky top-4 z-30 mb-4 p-3.5 bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white rounded-2xl shadow-xl flex items-center justify-between gap-3 text-xs font-semibold animate-in fade-in";
+      const tableEl = document.getElementById("requestRows")?.closest("table");
+      if (tableEl && tableEl.parentNode) {
+        tableEl.parentNode.insertBefore(bulkBar, tableEl);
+      }
+    }
+    bulkBar.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="w-6 h-6 rounded-full bg-white text-blue-800 font-extrabold text-xs flex items-center justify-center shadow-xs">${selectedBatchRequestIds.size}</span>
+        <span>request${selectedBatchRequestIds.size > 1 ? 's' : ''} selected for bulk assignment</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="window.openBatchAssignMode()" class="px-3.5 py-1.5 rounded-xl bg-white text-blue-800 hover:bg-blue-50 font-bold transition flex items-center gap-1.5 shadow-sm">
+          <span>⚡</span> Assign to Technician →
+        </button>
+        <button type="button" onclick="window.clearSelectedBatchRequests()" class="px-2.5 py-1.5 rounded-xl bg-blue-900/60 hover:bg-blue-900 text-blue-100 font-medium transition">
+          Clear
+        </button>
+      </div>
+    `;
+    bulkBar.style.display = "flex";
+  } else if (bulkBar) {
+    bulkBar.style.display = "none";
+  }
+
+  const batchCountBadge = document.getElementById("batchSelectedCountBadge");
+  if (batchCountBadge) {
+    batchCountBadge.textContent = selectedBatchRequestIds.size;
+    batchCountBadge.style.display = selectedBatchRequestIds.size > 0 ? "inline-flex" : "none";
+  }
+
+  const batchBtn = document.getElementById("confirmBatchAssignBtn");
+  if (batchBtn) {
+    batchBtn.disabled = selectedBatchRequestIds.size === 0 || technicians.length === 0;
+    batchBtn.innerHTML = `<span>⚡</span> Assign ${selectedBatchRequestIds.size} Request${selectedBatchRequestIds.size === 1 ? '' : 's'} to Technician`;
+  }
+};
 let companies = [];
 let companyAppliances = [];
 let branches = [];
@@ -7048,7 +7153,7 @@ function renderDirectory(page) {
 function renderRequestDirectory() {
   $("metricGrid").hidden = true; $("requestSearch").placeholder = "Search service requests by ID, customer, appliance, or status";
   $("tableTitle").textContent = "Service requests"; $("tableSubtitle").textContent = "Service activity across all ServSure partner accounts.";
-  $("requestHead").innerHTML = ["Request ID", "Customer", "Appliance", "Issue", "Status", "Date", "Action"].map((label) => `<th>${label}</th>`).join("");
+  $("requestHead").innerHTML = ["#", "Request ID", "Customer", "Appliance", "Issue", "Status", "Date", "Action"].map((label) => `<th>${label}</th>`).join("");
   const query = ($("requestSearch")?.value || "").trim().toLowerCase();
   const statusFilt = $("statusFilter") ? $("statusFilter").value : "all";
   const filtered = requests.filter((item) => {
@@ -7056,8 +7161,9 @@ function renderRequestDirectory() {
     const matchesStatus = statusFilt === "all" || item.status_badge === statusFilt;
     return matchesQuery && matchesStatus;
   });
-  $("requestRows").innerHTML = filtered.length ? filtered.map((item) => `
+  $("requestRows").innerHTML = filtered.length ? filtered.map((item, index) => `
     <tr>
+      <td><span class="font-mono text-xs font-bold text-slate-500">${index + 1}</span></td>
       <td><strong class="font-mono text-blue-600 font-bold">${safe(item.id)}</strong></td>
       <td><strong class="text-slate-900 block font-semibold">${safe(item.customer_name)}</strong><small class="text-slate-400">${safe(item.customer_phone || "")}</small></td>
       <td><strong class="text-slate-800 block text-xs">${safe(item.brand || "")} ${safe(item.appliance_name)}</strong><small class="text-slate-400 font-mono">${safe(item.model_no || "")}</small></td>
@@ -7070,7 +7176,7 @@ function renderRequestDirectory() {
         </button>
       </td>
     </tr>
-  `).join("") : `<tr><td class="empty-row" colspan="7">No service requests found.</td></tr>`;
+  `).join("") : `<tr><td class="empty-row" colspan="8">No service requests found.</td></tr>`;
   if ($("requestCount")) $("requestCount").textContent = `${filtered.length} service requests shown`;
   if ($("sidePanelTitle")) $("sidePanelTitle").textContent = "Request status";
   if ($("healthContent")) $("healthContent").innerHTML = `<div class="section-empty"><strong>${requests.length}</strong> total service requests</div>`;
@@ -7422,7 +7528,7 @@ function renderRequests() {
       }
     }
 
-    techContainer.innerHTML = activeJobs.length ? activeJobs.map((item) => {
+    techContainer.innerHTML = activeJobs.length ? activeJobs.map((item, index) => {
       let scheduleBadge = "";
       if (isJobScheduledForToday(item.appointment_date)) {
         scheduleBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">📅 Today</span>`;
@@ -7437,6 +7543,7 @@ function renderRequests() {
         <div class="flex items-start justify-between gap-3">
           <div>
             <div class="flex items-center gap-2 flex-wrap">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-blue-100 text-blue-800 font-mono border border-blue-200">Visit #${index + 1}</span>
               <span class="text-[11px] font-bold uppercase tracking-wider text-blue-600 font-mono">${safe(item.id)}</span>
               ${scheduleBadge}
             </div>
@@ -7576,15 +7683,52 @@ function renderRequests() {
   if (tableEl) tableEl.style.display = "";
   if (techContainer) techContainer.style.display = "none";
 
-  let head = config.columns;
+  let headHtml = "";
+  let totalColumns = 7;
   if (role === "franchise") {
-    head = ["Request ID", "Customer", "Appliance", "Issue", "Assigned Technician", "Priority", "Status", "Action"];
+    totalColumns = 10;
+    headHtml = `
+      <th class="w-8 text-center">
+        <input type="checkbox" id="selectAllReqCheckbox" onchange="window.toggleSelectAllRequests(this.checked)" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer" title="Select all pending for batch assignment">
+      </th>
+      <th class="w-10 text-center font-mono text-xs">#</th>
+      <th>Request ID</th>
+      <th>Customer</th>
+      <th>Appliance</th>
+      <th>Issue</th>
+      <th>Assigned Technician</th>
+      <th>Priority</th>
+      <th>Status</th>
+      <th>Action</th>
+    `;
   } else if (role === "company") {
-    head = ["Request ID", "Customer", "PIN Code", "Routed Branch", "Status", "Action"];
+    totalColumns = 7;
+    headHtml = `
+      <th class="w-10 text-center font-mono text-xs">#</th>
+      <th>Request ID</th>
+      <th>Customer</th>
+      <th>PIN Code</th>
+      <th>Routed Branch</th>
+      <th>Status</th>
+      <th>Action</th>
+    `;
+  } else {
+    // Default admin
+    totalColumns = 8;
+    headHtml = `
+      <th class="w-10 text-center font-mono text-xs">#</th>
+      <th>Request ID</th>
+      <th>Customer</th>
+      <th>Brand</th>
+      <th>Appliance</th>
+      <th>Status</th>
+      <th>Date</th>
+      <th>Action</th>
+    `;
   }
 
-  if ($("requestHead")) $("requestHead").innerHTML = head.map((name) => `<th>${safe(name)}</th>`).join("");
-  if ($("requestRows")) $("requestRows").innerHTML = filtered.length ? filtered.map((item) => {
+  if ($("requestHead")) $("requestHead").innerHTML = headHtml;
+  if ($("requestRows")) $("requestRows").innerHTML = filtered.length ? filtered.map((item, index) => {
     const customer = `<div class="customer-cell"><span class="customer-avatar">${safe((item.customer_name || "U").split(/\s+/).map((part) => part[0]).slice(0, 2).join(""))}</span><span class="customer-name">${safe(item.customer_name)}<small>${safe(item.customer_phone || "ServSure customer")}</small></span></div>`;
 
     if (role === "franchise") {
@@ -7611,6 +7755,7 @@ function renderRequests() {
       const priorityBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${priorityClass(item.priority || 'Medium')}">${safe(item.priority || 'Medium')}</span>`;
       const isCurrentlyReopened = (item.status === "Reopened / Under Review" || item.status_badge === "Reopened" || Boolean(item.is_reopened)) && item.status !== "Completed";
       const isCompleted = item.status === "Completed" || item.status_badge === "Completed";
+      const isCompletedOrCancelled = isCompleted || item.status === "Cancelled" || item.status_badge === "Cancelled";
       const statusPill = renderStatusBadge(item);
 
       const isDispatched = item.status === "Technician on the Way" || (isAssigned && !isCompleted);
@@ -7638,7 +7783,12 @@ function renderRequests() {
           : `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 mt-1" title="Company OEM routed request">🏢 Received from Company</span>`)
         : "";
       const reqIdCell = `<div class="flex flex-col items-start"><span class="cursor-pointer text-blue-600 hover:underline font-mono font-bold" onclick="viewRequestDetails('${safe(item.id)}')">${safe(item.id)}</span>${sourceBadge}</div>`;
-      const cells = [reqIdCell, customer, safe(item.appliance_name), safe(item.issue), techCell, priorityBadge, statusPill, actionCell];
+
+      const isChecked = selectedBatchRequestIds.has(item.id);
+      const checkCell = `<div class="text-center" onclick="event.stopPropagation()"><input type="checkbox" class="request-row-checkbox rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer ${isCompletedOrCancelled ? 'opacity-30 cursor-not-allowed' : ''}" value="${safe(item.id)}" ${isChecked ? 'checked' : ''} ${isCompletedOrCancelled ? 'disabled' : ''} onchange="window.toggleRequestSelection('${safe(item.id)}', this.checked)"></div>`;
+      const snoCell = `<span class="font-mono text-xs font-bold text-slate-500 text-center block">${index + 1}</span>`;
+
+      const cells = [checkCell, snoCell, reqIdCell, customer, safe(item.appliance_name), safe(item.issue), techCell, priorityBadge, statusPill, actionCell];
       return `<tr>${cells.map((cell) => `<td>${cell}</td>`).join("")}</tr>`;
     }
 
@@ -7651,15 +7801,21 @@ function renderRequests() {
       const trackBtn = isDispatched ? `<button class="table-action font-semibold text-xs text-indigo-600 hover:text-indigo-800 ml-2" onclick="event.stopPropagation(); openTechRouteMap('${safe(item.id)}')">Track 📍</button>` : '';
       const actionBtn = `<button class="table-action font-semibold text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1" onclick="event.stopPropagation(); viewRequestDetails('${safe(item.id)}')"><span>👁️</span> View Details →</button>`;
       const reqIdCell = `<span class="font-mono font-bold text-blue-600">${safe(item.id)}</span>`;
-      const cells = [reqIdCell, customer, pinCode, routedBranch, statusPill, `<div class="flex items-center gap-1">${actionBtn}${trackBtn}</div>`];
+      const snoCell = `<span class="font-mono text-xs font-bold text-slate-500 text-center block">${index + 1}</span>`;
+      const cells = [snoCell, reqIdCell, customer, pinCode, routedBranch, statusPill, `<div class="flex items-center gap-1">${actionBtn}${trackBtn}</div>`];
       return `<tr class="cursor-pointer hover:bg-blue-50/40 transition" onclick="viewRequestDetails('${safe(item.id)}')">${cells.map((cell) => `<td>${cell}</td>`).join("")}</tr>`;
     }
 
     // Default admin
     const action = `<button class="table-action font-semibold text-xs text-blue-600 hover:text-blue-800" onclick="event.stopPropagation(); viewRequestDetails('${safe(item.id)}')">View details →</button>`;
-    const cells = [safe(item.id), customer, safe(item.brand), safe(item.appliance_name), renderStatusBadge(item), safe(item.appointment_date), action];
+    const snoCell = `<span class="font-mono text-xs font-bold text-slate-500 text-center block">${index + 1}</span>`;
+    const cells = [snoCell, safe(item.id), customer, safe(item.brand), safe(item.appliance_name), renderStatusBadge(item), safe(item.appointment_date), action];
     return `<tr class="cursor-pointer hover:bg-blue-50/40 transition" onclick="viewRequestDetails('${safe(item.id)}')">${cells.map((cell) => `<td>${cell}</td>`).join("")}</tr>`;
-  }).join("") : `<tr><td class="empty-row" colspan="${head.length}">No service requests match this view.</td></tr>`;
+  }).join("") : `<tr><td class="empty-row" colspan="${totalColumns}">No service requests match this view.</td></tr>`;
+
+  if (role === "franchise") {
+    window.updateBatchSelectionUI();
+  }
 
   if ($("requestCount")) {
     const filterNote = (isFranchiseDual() && franchiseRequestSourceFilter !== "all")
@@ -7682,18 +7838,66 @@ function renderInsights() {
 
     if ($("healthContent")) $("healthContent").innerHTML = `
       <div class="p-4 space-y-3">
-        <div id="reassignInfoBanner" class="hidden p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 leading-snug">
+        <!-- Mode toggle: Single vs Multiple -->
+        <div class="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
+          <button type="button" onclick="window.setBatchAssignMode('single')" class="flex-1 py-1.5 rounded-lg transition text-center ${batchAssignMode === 'single' ? 'bg-white text-blue-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'}">
+            Single Request
+          </button>
+          <button type="button" onclick="window.setBatchAssignMode('multiple')" class="flex-1 py-1.5 rounded-lg transition text-center flex items-center justify-center gap-1.5 ${batchAssignMode === 'multiple' ? 'bg-white text-blue-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'}">
+            <span>Multiple Requests</span>
+            <span id="batchSelectedCountBadge" class="inline-flex items-center justify-center px-1.5 py-0.2 rounded-full text-[10px] bg-blue-600 text-white font-extrabold ${selectedBatchRequestIds.size > 0 ? '' : 'hidden'}">${selectedBatchRequestIds.size}</span>
+          </button>
         </div>
-        <div>
-          <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Select Service Request</label>
-          <select id="assignReqSelect" onchange="window.updateAssignmentPanelState()" class="w-full text-xs rounded-lg border border-slate-200 p-2 bg-white text-slate-800 focus:outline-blue-500">
-            ${pendingReqs.map(r => {
-              const assignedName = r.technician?.name || r.technician_name;
-              const labelSuffix = assignedName ? `[Assigned: ${safe(assignedName)}]` : `[Unassigned]`;
-              return `<option value="${safe(r.id)}">${safe(r.id)} - ${safe(r.customer_name)} (${labelSuffix})</option>`;
-            }).join('') || '<option value="">No pending requests</option>'}
-          </select>
-        </div>
+
+        ${batchAssignMode === 'single' ? `
+          <div id="reassignInfoBanner" class="hidden p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 leading-snug">
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Select Service Request</label>
+            <select id="assignReqSelect" onchange="window.updateAssignmentPanelState()" class="w-full text-xs rounded-lg border border-slate-200 p-2 bg-white text-slate-800 focus:outline-blue-500">
+              ${pendingReqs.map((r, i) => {
+                const assignedName = r.technician?.name || r.technician_name;
+                const labelSuffix = assignedName ? `[Assigned: ${safe(assignedName)}]` : `[Unassigned]`;
+                return `<option value="${safe(r.id)}">#${i + 1} · ${safe(r.id)} - ${safe(r.customer_name)} (${labelSuffix})</option>`;
+              }).join('') || '<option value="">No pending requests</option>'}
+            </select>
+          </div>
+        ` : `
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Select Requests to Assign</label>
+              <div class="flex items-center gap-2 text-[10px]">
+                <button type="button" onclick="window.selectAllUnassignedForBatch()" class="text-blue-600 hover:underline font-bold">Select Unassigned</button>
+                <span class="text-slate-300">|</span>
+                <button type="button" onclick="window.clearSelectedBatchRequests()" class="text-slate-500 hover:underline">Clear</button>
+              </div>
+            </div>
+            <div class="max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/70 p-2 space-y-1">
+              ${pendingReqs.map((r, i) => {
+                const isChecked = selectedBatchRequestIds.has(r.id);
+                const assignedName = r.technician?.name || r.technician_name;
+                const statusTag = assignedName
+                  ? `<span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">Reassign</span>`
+                  : `<span class="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">Unassigned</span>`;
+                return `
+                  <label class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-white cursor-pointer text-xs border border-transparent hover:border-slate-200 transition ${isChecked ? 'bg-blue-50/70 border-blue-200' : ''}">
+                    <input type="checkbox" class="panel-req-checkbox rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 flex-none" value="${safe(r.id)}" ${isChecked ? 'checked' : ''} onchange="window.toggleRequestSelection('${safe(r.id)}', this.checked)">
+                    <span class="font-mono font-bold text-[11px] text-slate-500 w-6 flex-none">#${i + 1}</span>
+                    <div class="min-w-0 flex-1">
+                      <div class="font-mono font-bold text-blue-600 truncate text-[11px]">${safe(r.id)}</div>
+                      <div class="text-[10px] text-slate-600 truncate">${safe(r.customer_name)} · ${safe(r.appliance_name)}</div>
+                    </div>
+                    ${statusTag}
+                  </label>
+                `;
+              }).join('') || '<div class="text-center py-4 text-xs text-slate-400">No pending requests to assign</div>'}
+            </div>
+            <div class="mt-1.5 flex items-center justify-between text-[11px] text-slate-500 px-1">
+              <span>Selected: <strong class="text-slate-800 font-bold" id="batchPanelCountLabel">${selectedBatchRequestIds.size}</strong> of ${pendingReqs.length} requests</span>
+            </div>
+          </div>
+        `}
+
         <div>
           <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Select Technician</label>
           <select id="assignTechSelect" class="w-full text-xs rounded-lg border border-slate-200 p-2 bg-white text-slate-800 focus:outline-blue-500">
@@ -7708,8 +7912,8 @@ function renderInsights() {
             <option value="Normal">🔵 Normal Priority</option>
           </select>
         </div>
-        <button id="confirmAssignBtn" type="button" onclick="confirmTechnicianAssignment()" class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-1.5" ${technicians.length === 0 ? "disabled" : ""}>
-          <span>⚡</span> Assign Technician
+        <button id="confirmAssignBtn" type="button" onclick="confirmTechnicianAssignment()" class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-1.5" ${technicians.length === 0 || (batchAssignMode === 'multiple' && selectedBatchRequestIds.size === 0) ? "disabled" : ""}>
+          <span>⚡</span> ${batchAssignMode === 'multiple' ? `Assign ${selectedBatchRequestIds.size > 0 ? selectedBatchRequestIds.size + ' ' : ''}Requests to Technician` : 'Assign Technician'}
         </button>
       </div>
     `;
@@ -9155,12 +9359,23 @@ window.openTechRouteMap = function(requestId) {
 };
 
 window.updateAssignmentPanelState = function() {
+  const btn = document.getElementById("confirmAssignBtn");
+  const banner = document.getElementById("reassignInfoBanner");
+  if (!btn) return;
+
+  if (batchAssignMode === "multiple") {
+    if (banner) banner.classList.add("hidden");
+    const count = selectedBatchRequestIds.size;
+    btn.innerHTML = `<span>⚡</span> Assign ${count > 0 ? count + ' ' : ''}Request${count === 1 ? '' : 's'} to Technician`;
+    btn.className = "w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-1.5" + (count === 0 ? " opacity-50 cursor-not-allowed" : "");
+    btn.disabled = count === 0 || technicians.length === 0;
+    return;
+  }
+
   const reqSel = document.getElementById("assignReqSelect");
   const techSel = document.getElementById("assignTechSelect");
   const prioSel = document.getElementById("assignPrioritySelect");
-  const btn = document.getElementById("confirmAssignBtn");
-  const banner = document.getElementById("reassignInfoBanner");
-  if (!reqSel || !btn) return;
+  if (!reqSel) return;
 
   const reqId = reqSel.value;
   const req = requests.find((r) => r.id === reqId);
@@ -9193,6 +9408,10 @@ window.updateAssignmentPanelState = function() {
 };
 
 window.selectRequestForAssignment = function(requestId) {
+  if (batchAssignMode !== "single") {
+    batchAssignMode = "single";
+    renderInsights();
+  }
   const reqSel = document.getElementById("assignReqSelect");
   if (reqSel) {
     reqSel.value = requestId;
@@ -9209,15 +9428,70 @@ window.selectRequestForAssignment = function(requestId) {
 };
 
 window.confirmTechnicianAssignment = async function() {
-  const reqId = document.getElementById("assignReqSelect")?.value;
   const techId = document.getElementById("assignTechSelect")?.value;
-  if (!reqId || !techId) {
+  if (!techId) {
+    showToast("Please select a technician.", "error");
+    return;
+  }
+  const priority = document.getElementById("assignPrioritySelect")?.value || "Medium";
+
+  // Batch assign mode or multiple requests selected
+  if (batchAssignMode === "multiple" || selectedBatchRequestIds.size > 1) {
+    const targetIds = Array.from(selectedBatchRequestIds);
+    if (!targetIds.length) {
+      showToast("Please select at least one request to assign.", "error");
+      return;
+    }
+
+    try {
+      showToast(`Assigning ${targetIds.length} request${targetIds.length === 1 ? '' : 's'} to technician…`);
+      const res = await fetch(`${API_BASE_URL}/api/requests/batch-assign`, {
+        method: "POST",
+        credentials: "include",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          request_ids: targetIds,
+          technician_id: techId,
+          priority
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(extractErrorMessage(data, "Failed to assign requests"));
+      }
+
+      const updatedList = Array.isArray(data.requests) ? data.requests : (Array.isArray(data.updated_requests) ? data.updated_requests : []);
+      if (updatedList.length) {
+        updatedList.forEach(updatedReq => {
+          const idx = requests.findIndex(r => r.id === updatedReq.id);
+          if (idx !== -1) requests[idx] = updatedReq;
+        });
+      }
+
+      try { localStorage.setItem(`servora_cache_requests_${role}`, JSON.stringify(requests)); } catch {}
+
+      const assignedTechObj = technicians.find(t => t.id === techId) || { name: data.technician_name };
+      const techName = assignedTechObj?.name || data.technician_name || "Technician";
+
+      showToast(`Successfully assigned ${data.assigned_count || targetIds.length} request(s) to ${techName}!`);
+      selectedBatchRequestIds.clear();
+      setMetrics();
+      renderRequests();
+      renderInsights();
+    } catch (err) {
+      showToast(extractErrorMessage(err.message, "Failed to assign requests"), "error");
+    }
+    return;
+  }
+
+  // Single assign fallback
+  const reqId = document.getElementById("assignReqSelect")?.value || Array.from(selectedBatchRequestIds)[0];
+  if (!reqId) {
     showToast("Please select both a request and a technician.", "error");
     return;
   }
   const req = requests.find((r) => r.id === reqId);
   const isReassign = Boolean(req?.technician?.name || req?.technician_name);
-  const priority = document.getElementById("assignPrioritySelect")?.value || "Medium";
 
   try {
     showToast(isReassign ? "Reassigning technician…" : "Assigning technician…");
@@ -9244,6 +9518,7 @@ window.confirmTechnicianAssignment = async function() {
     const techName = assignedTechObj?.name || "Technician";
 
     showToast(isReassign ? `Successfully reassigned ${reqId} to ${techName}!` : `Technician ${techName} assigned to ${reqId}!`);
+    selectedBatchRequestIds.delete(reqId);
     setMetrics();
     renderRequests();
     renderInsights();

@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.3.8 (Production Feature - Timestamped Service Request ID Format SR-XXXX-YYYYMMDD-HHMMSS)
-Last Updated: November 27, 2026 (14:15 IST)
+Version: 2.3.9 (Production Feature - Multi-Request Technician Assignment & Request Serial Numbers)
+Last Updated: November 27, 2026 (17:05 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -873,6 +873,19 @@ Request Headers:
     - Generates new doorstep OTPs (`start_otp`, `completion_otp`, `verification_otp`).
     - Builds fresh franchise timeline starting with *"Request Opened with Local Franchise"*.
     - Returns newly created `ServiceRequestDetail`.
+- `POST /api/requests/{request_id}/assign`:
+  - Body: `{ "technician_id": "tech_123", "priority": "High" }`
+  - Access Control: Role must be `franchise`, `branch`, `company`, or `admin`.
+  - Assigns single technician to the specified request, updates timeline step 2 to completed, sets status to `Technician Assigned` (`status_badge = "Scheduled"`), dispatches doorstep notification with OTP instructions, and returns `ServiceRequestDetail`.
+- `POST /api/requests/batch-assign`:
+  - Body: `{ "request_ids": ["SR-1", "SR-2", ...], "technician_id": "tech_123", "priority": "High" }`
+  - Access Control: Role must be `franchise`, `branch`, `company`, or `admin`.
+  - Batch assigns multiple service requests to a single technician in a single transactional database commit.
+  - Automatically skips completed or cancelled tickets (unless marked as `is_reopened`) to safeguard completed records.
+  - Updates each request's `technician_id`, `priority`, timeline step 2 (marked completed with technician details), sets `status = "Technician Assigned"`, `status_badge = "Scheduled"`.
+  - Triggers email and in-app notifications for each assigned service request.
+  - Returns `BatchAssignResponse`:
+    `{ "success": true, "assigned_count": 3, "failed_count": 0, "technician_id": "tech_123", "technician_name": "Ramesh Tech", "requests": [...] }`
 
 5.7. Customer Appliances & Warranty (`/api/appliances`)
 -------------------------------------------------------
@@ -2853,6 +2866,53 @@ were identified between the initial rough draft documentation and the actual cod
         - Step 4: `create_or_update_estimate` generates derived `EST-XXXX-YYYYMMDD-HHMMSS`.
         - Step 5: `switch_request_to_franchise` generates timestamped franchise ticket ID.
         - Step 6: Querying legacy tickets (e.g. `SR-7845`) operates normally without regressions.
+
+33. MULTI-REQUEST TECHNICIAN ASSIGNMENT & SERIAL NUMBERS (v2.3.9)
+    - Purpose:
+      - Empower franchise operators and hub dispatchers to assign multiple service calls to a single technician simultaneously in one action, eliminating repetitive single-ticket assignments.
+      - Introduce clean, sequential serial numbers (`#` / `S.No` 1, 2, 3...) across service request lists, technician visit cards, and assignment modals so technicians and operators can easily reference jobs in field routes and priority queues.
+    - Backend Architecture & Endpoint (`POST /api/requests/batch-assign`):
+      - Schema:
+        - `BatchAssignPayload`: `{ request_ids: List[str], technician_id: str, priority: Optional[str] = "Medium" }`
+        - `BatchAssignResponse`: `{ success: bool, assigned_count: int, failed_count: int, technician_id: str, technician_name: str, requests: List[ServiceRequestDetail] }`
+        - Also updated `FranchiseAssignPayload` with optional `request_ids: Optional[List[str]] = None` for backward compatibility.
+      - Route Logic:
+        - Validates role authorization (`franchise`, `branch`, `company`, or `admin`).
+        - Validates technician existence and active branch linkage.
+        - Resolves target requests matching `request_ids`.
+        - Safeguard: Automatically skips completed or cancelled tickets (unless marked as `is_reopened`) to safeguard completed records.
+        - Updates each request within a database transaction:
+          - Sets `technician_id = tech.id`.
+          - Updates `priority`.
+          - Advances timeline step 2 to `state = "completed"` with description indicating assigned technician name and title.
+          - Advances timeline step 3 to `state = "current"` (ready for dispatch).
+          - Sets `status = "Technician Assigned"`, `status_badge = "Scheduled"`.
+        - Dispatches customer email and doorstep notification with OTP instructions for each assigned ticket.
+        - Returns formatted `BatchAssignResponse`.
+    - Frontend Implementation (`frontend/js/ops-dashboard.js`):
+      - Sequential Serial Numbers:
+        - Franchise Requests Table: Added `#` column header and `<td><span class="font-mono text-xs font-bold text-slate-500 text-center block">${index + 1}</span></td>`.
+        - Company Requests Table: Added `#` column header and serial number cell `${index + 1}`.
+        - Admin Requests Table: Added `#` column header and serial number cell `${index + 1}`.
+        - Service Request Directory (`renderRequestDirectory`): Added `#` column header and serial number cell `${index + 1}`.
+        - Technician Job Route Cards (`renderRequests`): Added `Visit #${index + 1}` badge on active job cards (`<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-blue-100 text-blue-800 font-mono border border-blue-200">Visit #${index + 1}</span>`).
+      - Multi-Request Selection & Batch Assignment:
+        - Master checkbox in table header (`#selectAllReqCheckbox`) with indeterminate state handling.
+        - Row-level checkboxes (`.request-row-checkbox`) on all active/pending requests (disabled for completed/cancelled calls).
+        - Floating Bulk Action Bar (`#requestsBulkActionBar`): Appears dynamically when 1 or more requests are selected, displaying count pill, `⚡ Assign to Technician →` action, and `Clear` button.
+        - Franchise Dispatch Sidebar (`renderInsights`):
+          - Mode Switcher: Toggle between `Single Request` and `Multiple Requests` tabs.
+          - Single Request Mode: Dropdown with serial numbers (`#${i + 1} · ${r.id} - ${r.customer_name}`).
+          - Multiple Requests Mode: Scrollable list with quick `Select Unassigned` and `Clear` shortcuts, displaying `#${i + 1}` serial numbers, customer/appliance details, and reassign tags.
+          - Assignment Handler (`confirmTechnicianAssignment`): Automatically routes to `POST /api/requests/batch-assign` when multiple tickets are selected or when in Multiple Requests mode, updating local cached state and re-rendering instantly with toast confirmation.
+    - Verification:
+      - Python compilation passed: `python3 -m py_compile backend/app/schemas/__init__.py backend/app/routes/requests.py`.
+      - JavaScript syntax check passed: `node --check frontend/js/ops-dashboard.js`.
+      - Integration test `test_batch_assignment.py` passed all verification steps:
+        - Step 1: Batch assignment of 3 requests to technician with `High` priority.
+        - Step 2: DB verification of `status = "Technician Assigned"`, `status_badge = "Scheduled"`, `technician_id`, `timeline_json` step 2 completed.
+        - Step 3: Notification logs generated for all tickets.
+        - Step 4: Graceful handling of completed/invalid ticket IDs without failing the entire batch.
 
 ==================================================
 End of Documentation
