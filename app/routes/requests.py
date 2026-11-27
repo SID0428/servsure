@@ -46,11 +46,13 @@ def create_service_request(payload: ServiceBookingCreate, request: Request):
     app_brand = appliance.brand if appliance else "Authorized Brand"
     app_model = appliance.model_no if appliance else "STD-01"
 
-    # Generate new Ticket ID like SR-7846
+    # Generate new Ticket ID like SR-7846-20261127-140530
+    now_obj = datetime.now()
+    date_time_suffix = now_obj.strftime("%Y%m%d-%H%M%S")
     req_num = random.randint(7850, 9999)
-    new_id = f"SR-{req_num}"
+    new_id = f"SR-{req_num}-{date_time_suffix}"
     
-    now_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    now_str = now_obj.strftime("%d %b %Y, %I:%M %p")
     otp_code = str(random.randint(1000, 9999))
     
     new_request = ServiceRequest(

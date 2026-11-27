@@ -64,6 +64,20 @@ from app.security import get_authenticated_user
 
 router = APIRouter(prefix="/api/requests", tags=["requests"])
 
+def generate_service_request_id(db: Optional[Session] = None, now: Optional[datetime] = None) -> str:
+    """
+    Generates a unique Service Request ID with embedded date and time:
+    Format: SR-{random_num}-{YYYYMMDD}-{HHMMSS}
+    Example: SR-8492-20261127-140530
+    """
+    dt = now or datetime.now()
+    date_time_suffix = dt.strftime("%Y%m%d-%H%M%S")
+    while True:
+        req_num = random.randint(7850, 9999)
+        candidate_id = f"SR-{req_num}-{date_time_suffix}"
+        if db is None or not db.query(ServiceRequestModel).filter(ServiceRequestModel.id == candidate_id).first():
+            return candidate_id
+
 def format_job_card(jc: JobCardModel) -> JobCardResponse:
     parts_raw = json.loads(jc.parts_used_json) if jc.parts_used_json else []
     parts = [JobCardPartItem(**p) if isinstance(p, dict) else p for p in parts_raw]
@@ -1147,9 +1161,9 @@ def create_request(payload: ServiceBookingCreate, request: Request, db: Session 
                     detail=f"The selected appointment slot '{payload.preferred_slot}' on {payload.preferred_date} is unavailable ({selected_slot.reason or 'Capacity reached'}). Please choose an open slot."
                 )
 
-    req_num = random.randint(7850, 9999)
-    new_id = f"SR-{req_num}"
-    now_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    now_obj = datetime.now()
+    new_id = generate_service_request_id(db=db, now=now_obj)
+    now_str = now_obj.strftime("%d %b %Y, %I:%M %p")
     start_otp_code = str(random.randint(1000, 9999))
     completion_otp_code = str(random.randint(1000, 9999))
     while completion_otp_code == start_otp_code:
@@ -1447,11 +1461,7 @@ def switch_request_to_franchise(
     final_slot = "Flexible / Outstation Visit" if is_outstation else appt_slot
 
     # 3. Generate unique ticket ID and new OTPs
-    req_num = random.randint(7850, 9999)
-    new_id = f"SR-{req_num}"
-    while db.query(ServiceRequestModel).filter(ServiceRequestModel.id == new_id).first():
-        req_num = random.randint(7850, 9999)
-        new_id = f"SR-{req_num}"
+    new_id = generate_service_request_id(db=db)
 
     start_otp_code = str(random.randint(1000, 9999))
     completion_otp_code = str(random.randint(1000, 9999))

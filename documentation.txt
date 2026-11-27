@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.3.7 (Production Feature - Multi-Brand Partner Retention & Dual Entity Display for Pre-added Company Branches)
-Last Updated: November 27, 2026 (13:45 IST)
+Version: 2.3.8 (Production Feature - Timestamped Service Request ID Format SR-XXXX-YYYYMMDD-HHMMSS)
+Last Updated: November 27, 2026 (14:15 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -387,7 +387,7 @@ All database entities are defined in `backend/app/db/models.py`:
     - `invoice_url`: Text.
 
 11. `ServiceRequestModel` (`service_requests` table):
-    - `id`: String(64), Primary Key (e.g., `SR-7845`).
+    - `id`: String(64), Primary Key (e.g., `SR-7845` legacy or timestamped `SR-8492-20261127-140530` format combining 4-digit number with creation date and time).
     - `customer_id`: String(64), ForeignKey("users.id", CASCADE).
     - `appliance_id`: String(64), ForeignKey("appliances.id", CASCADE).
     - `appliance_id`: String(64), ForeignKey("appliances.id", CASCADE), Nullable: True.
@@ -849,6 +849,7 @@ Request Headers:
     - `service_route_preference == "franchise"`: Directs complaint to chosen nearby Local Dealer Shop & Franchise. Allows booking without knowing the company or without pre-registering an appliance; backend auto-creates a lightweight appliance record (`Local Dealer Serviced`) under the customer profile.
   - Proximity & Outstation Detection: Calculates distance from chosen dealer or nearest branch. Sets `is_outstation` and flexible appointment if outside local radius.
   - Automatically generates 4-digit start and completion OTPs.
+  - Automatically generates unique Service Request ID with embedded date and time timestamp formatted as `SR-{number}-{YYYYMMDD}-{HHMMSS}` (e.g. `SR-8492-20261127-140530`), combining random ticket identifier with creation date and time.
 - `POST /api/requests/{request_id}/reschedule`:
   - Body: `{ "new_date": "2026-10-26", "new_slot": "04:00 PM - 06:00 PM", "reason": "Customer unavailable" }`
   - Access Control: Customer can only reschedule their own requests; Franchise/Admin can reschedule assigned tickets.
@@ -866,7 +867,7 @@ Request Headers:
     - Unassigns any company technician (`technician_id = None`).
     - Appends audit timeline step: *"Request Closed by Customer: Customer cancelled and closed this service request."* (Contains zero mention of franchise or local dealer).
   - New Franchise Request Creation:
-    - Opens fresh ticket (`SR-xxxx`) assigned to chosen local franchise (`branch_id = payload.branch_id`, `dealer_shop_name = branch.branch_name`).
+    - Opens fresh ticket with timestamped ID (`SR-{number}-{YYYYMMDD}-{HHMMSS}`) assigned to chosen local franchise (`branch_id = payload.branch_id`, `dealer_shop_name = branch.branch_name`).
     - Sets `service_route_preference = "franchise"` and `company_id = None` (strictly isolating it from the Company Portal).
     - Preserves appliance details, issue, doorstep address, coordinates, and photo.
     - Generates new doorstep OTPs (`start_otp`, `completion_otp`, `verification_otp`).
@@ -2809,6 +2810,49 @@ were identified between the initial rough draft documentation and the actual cod
         - Step C: Directory listing returning both parent company and multi-brand status, with technician counts preserved.
         - Step D: Deep-dive modal details returning unmasked technicians and parts inventory.
         - Step E: Fallback branch creation safely updating existing branch without duplicate user account creation.
+
+
+32. TIMESTAMPED SERVICE REQUEST ID GENERATION (v2.3.8)
+    - Purpose:
+      - Embed creation date and time directly into every Service Request ID, standardizing ticket references across customer portals, operations portals, technician job routes, and printed invoices.
+      - Retain the current 4-digit random number identifier while appending an ISO-compact date and 24-hour time component with second precision.
+      - Maintain complete backward compatibility with existing legacy tickets (e.g. `SR-7845`), derived entity keys, and substring search mechanisms.
+    - Format Specification:
+      - Pattern: `SR-{number}-{YYYYMMDD}-{HHMMSS}`
+      - Example: `SR-8492-20261127-140530`
+      - Breakdown:
+        1. `SR-`: Standard Service Request prefix.
+        2. `{number}`: 4-digit unique random integer between `7850` and `9999`.
+        3. `{YYYYMMDD}`: 8-digit calendar date (year, month, day).
+        4. `{HHMMSS}`: 6-digit timestamp (hour, minute, second in 24-hour format).
+      - Character Length: Exactly 23 characters, fitting well within the database column limit `Column(String(64))`.
+    - Architecture & Implementation:
+      - Central Helper `generate_service_request_id(db: Optional[Session] = None, now: Optional[datetime] = None) -> str`:
+        - Implemented in `backend/app/routes/requests.py`.
+        - Performs collision checks against `ServiceRequestModel.id` to guarantee uniqueness before returning.
+      - Endpoints Updated:
+        1. `POST /api/requests` (`create_request`):
+           - Customer ticket booking invokes `generate_service_request_id(db=db, now=now_obj)`.
+        2. `POST /api/requests/{request_id}/switch-to-franchise` (`switch_request_to_franchise`):
+           - Routing switch to local franchise generates fresh timestamped ID via `generate_service_request_id(db=db)`.
+        3. Prototype parity: Updated `app/routes/requests.py` (`create_request`) to generate matching timestamped IDs.
+      - Derived Entity Compatibility:
+        - Job Cards: `f"JC-{req.id.replace('SR-', '')}"` yields `JC-8492-20261127-140530` (Length 23 <= 64).
+        - Estimates: `f"EST-{req.id.replace('SR-', '')}"` yields `EST-8492-20261127-140530` (Length 24 <= 64).
+        - Warranty Claims: `f"CLM-{req.id.replace('SR-', '')}"` yields `CLM-8492-20261127-140530` (Length 24 <= 64).
+        - Service Feedback: `f"FB-{req.id.replace('SR-', '')}"` yields `FB-8492-20261127-140530` (Length 23 <= 64).
+        - Receipts & Invoices: `f"REC-{req.id}"` / `f"INV-{req.id.replace('SR-', '')}"` automatically adopt the timestamp.
+      - Frontend & Search Compatibility:
+        - Customer portal tracking cards, Operations Dashboard tables, technician job lists, and search queries use substring matching and URL encoding (`encodeURIComponent`), remaining fully compatible without any frontend regressions.
+    - Verification:
+      - Python compilation passed: `python3 -m py_compile backend/app/routes/requests.py app/routes/requests.py`.
+      - Integration test `test_request_id_timestamp.py` passed all verification steps:
+        - Step 1: Regex assertion `^SR-\d{4}-\d{8}-\d{6}$` on `generate_service_request_id()`.
+        - Step 2: `create_request` endpoint creates `SR-XXXX-YYYYMMDD-HHMMSS`.
+        - Step 3: `create_job_card` generates derived `JC-XXXX-YYYYMMDD-HHMMSS`.
+        - Step 4: `create_or_update_estimate` generates derived `EST-XXXX-YYYYMMDD-HHMMSS`.
+        - Step 5: `switch_request_to_franchise` generates timestamped franchise ticket ID.
+        - Step 6: Querying legacy tickets (e.g. `SR-7845`) operates normally without regressions.
 
 ==================================================
 End of Documentation
