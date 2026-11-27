@@ -115,6 +115,11 @@ def branch_payload(
         "zone_name": z_name,
         "zone_district": z_district,
         "zone_state": z_state,
+        "company_id": branch.company_id,
+        "dealer_companies": getattr(branch, "dealer_companies", None),
+        "is_dealer_franchise": bool(getattr(branch, "is_dealer_franchise", False)),
+        "is_dual_registered": bool(getattr(branch, "is_dual_registered", False)),
+        "registration_mode": getattr(branch, "registration_mode", None) or "standard",
         "is_active": getattr(branch_user, "is_active", False if (onboarding and not onboarding.password_set_at) else True) if branch_user else False,
         "password_set": bool(onboarding and onboarding.password_set_at),
         "password_set_at": onboarding.password_set_at.isoformat() if onboarding and onboarding.password_set_at else None,
@@ -234,11 +239,24 @@ def get_company_branch_details(
     onboarding = db.query(BranchOnboardingModel).filter_by(branch_id=branch.id).first()
     zone = db.query(CompanyZoneModel).filter(CompanyZoneModel.id == branch.zone_id).first() if branch.zone_id else None
     base_info = branch_payload(branch, onboarding, None, zone)
+    parent_company = db.query(UserModel).filter(UserModel.id == branch.company_id).first() if branch.company_id else None
     base_info["name"] = branch.branch_name
+    base_info["company_name"] = parent_company.name if parent_company else "ServSure Network"
+    base_info["parent_company_name"] = parent_company.name if parent_company else None
     base_info["status"] = "Active" if (onboarding and onboarding.password_set_at) else "Pending Setup"
     base_info["avatar"] = branch.branch_name[:2].upper()
 
     # 1. PEOPLE & STAFF (Manager + Technicians)
+    manager_jobs_query = db.query(ServiceRequestModel).filter(ServiceRequestModel.branch_id == branch.id)
+    if user.role != "admin":
+        manager_jobs_query = manager_jobs_query.filter(
+            or_(
+                ServiceRequestModel.service_route_preference == "company",
+                ServiceRequestModel.service_route_preference.is_(None)
+            ),
+            ServiceRequestModel.service_route_preference != "franchise",
+            ServiceRequestModel.dealer_shop_name.is_(None)
+        )
     manager_info = {
         "id": branch.id,
         "name": branch.manager_name,
@@ -250,15 +268,7 @@ def get_company_branch_details(
         "pincode": branch.pincode,
         "role": "manager",
         "rating": 5.0,
-        "total_jobs": db.query(ServiceRequestModel).filter(
-            ServiceRequestModel.branch_id == branch.id,
-            or_(
-                ServiceRequestModel.service_route_preference == "company",
-                ServiceRequestModel.service_route_preference.is_(None)
-            ),
-            ServiceRequestModel.service_route_preference != "franchise",
-            ServiceRequestModel.dealer_shop_name.is_(None)
-        ).count(),
+        "total_jobs": manager_jobs_query.count(),
         "status": "Active" if (onboarding and onboarding.password_set_at) else "Pending Setup",
         "avatar": branch.manager_name[:2].upper()
     }
@@ -296,12 +306,14 @@ def get_company_branch_details(
         })
 
     # 2. TOTAL STOCK ITEMS (Warehouse Inventory)
-    inv_items = db.query(FranchiseInventoryModel, SparePartModel).join(
+    inv_query = db.query(FranchiseInventoryModel, SparePartModel).join(
         SparePartModel, FranchiseInventoryModel.part_id == SparePartModel.id
     ).filter(
-        FranchiseInventoryModel.branch_id == branch.id,
-        SparePartModel.company_id == branch.company_id
-    ).all()
+        FranchiseInventoryModel.branch_id == branch.id
+    )
+    if user.role != "admin":
+        inv_query = inv_query.filter(SparePartModel.company_id == branch.company_id)
+    inv_items = inv_query.all()
 
     # If empty warehouse, seed initial catalog parts strictly registered for this company
     if not inv_items and branch.company_id:
@@ -317,12 +329,14 @@ def get_company_branch_details(
             db.add(inv)
         if all_parts:
             db.commit()
-            inv_items = db.query(FranchiseInventoryModel, SparePartModel).join(
+            inv_query_retry = db.query(FranchiseInventoryModel, SparePartModel).join(
                 SparePartModel, FranchiseInventoryModel.part_id == SparePartModel.id
             ).filter(
-                FranchiseInventoryModel.branch_id == branch.id,
-                SparePartModel.company_id == branch.company_id
-            ).all()
+                FranchiseInventoryModel.branch_id == branch.id
+            )
+            if user.role != "admin":
+                inv_query_retry = inv_query_retry.filter(SparePartModel.company_id == branch.company_id)
+            inv_items = inv_query_retry.all()
 
     stock_list = []
     total_stock_qty = 0
@@ -351,12 +365,14 @@ def get_company_branch_details(
         })
 
     # 3. STOCK MOVEMENTS (Sent & Received Logistics History)
-    txns = db.query(InventoryTransactionModel, SparePartModel).join(
+    txns_query = db.query(InventoryTransactionModel, SparePartModel).join(
         SparePartModel, InventoryTransactionModel.part_id == SparePartModel.id
     ).filter(
-        InventoryTransactionModel.branch_id == branch.id,
-        SparePartModel.company_id == branch.company_id
-    ).order_by(
+        InventoryTransactionModel.branch_id == branch.id
+    )
+    if user.role != "admin":
+        txns_query = txns_query.filter(SparePartModel.company_id == branch.company_id)
+    txns = txns_query.order_by(
         InventoryTransactionModel.created_at.desc()
     ).all()
 
@@ -379,15 +395,19 @@ def get_company_branch_details(
         })
 
     # 4. SERVICE REQUESTS & HISTORY (Ongoing & Completed)
-    reqs = db.query(ServiceRequestModel).filter(
-        ServiceRequestModel.branch_id == branch.id,
-        or_(
-            ServiceRequestModel.service_route_preference == "company",
-            ServiceRequestModel.service_route_preference.is_(None)
-        ),
-        ServiceRequestModel.service_route_preference != "franchise",
-        ServiceRequestModel.dealer_shop_name.is_(None)
-    ).order_by(ServiceRequestModel.created_at.desc()).all()
+    reqs_query = db.query(ServiceRequestModel).filter(
+        ServiceRequestModel.branch_id == branch.id
+    )
+    if user.role != "admin":
+        reqs_query = reqs_query.filter(
+            or_(
+                ServiceRequestModel.service_route_preference == "company",
+                ServiceRequestModel.service_route_preference.is_(None)
+            ),
+            ServiceRequestModel.service_route_preference != "franchise",
+            ServiceRequestModel.dealer_shop_name.is_(None)
+        )
+    reqs = reqs_query.order_by(ServiceRequestModel.created_at.desc()).all()
 
     ongoing_services = []
     completed_services = []

@@ -1727,6 +1727,23 @@ async function openCompanyBranchDetail(branchId) {
     if ($("branchModalMobile")) $("branchModalMobile").textContent = `📞 ${b.mobile || "—"}`;
     if ($("branchModalAddress")) $("branchModalAddress").textContent = `📍 ${b.address || "—"} (PIN: ${b.pincode || "—"})${b.zone_name ? ' · Zone: ' + b.zone_name : ''}`;
 
+    const parentComp = b.parent_company_name || existingBranch?.parent_company_name || (b.company_name && b.company_name !== "Multi-Brand Local Dealer Hub" && b.company_name !== "ServSure Network" ? b.company_name : (existingBranch?.company_name || "—"));
+    const isDealerBranch = Boolean(b.is_dealer_franchise || b.dealer_companies || b.is_dual_registered || existingBranch?.is_dealer_franchise || existingBranch?.dealer_companies);
+    if ($("branchModalParentCompany")) $("branchModalParentCompany").textContent = `🏢 Parent Company: ${parentComp}`;
+    if ($("branchModalDealerBadge")) {
+      if (isDealerBranch) $("branchModalDealerBadge").classList.remove("hidden");
+      else $("branchModalDealerBadge").classList.add("hidden");
+    }
+    const brandsText = b.dealer_companies || existingBranch?.dealer_companies;
+    if ($("branchModalBrands")) {
+      if (brandsText) {
+        $("branchModalBrands").textContent = `🏷️ Represented Brands: ${brandsText}`;
+        $("branchModalBrands").classList.remove("hidden");
+      } else {
+        $("branchModalBrands").classList.add("hidden");
+      }
+    }
+
     if ($("branchStatStaff")) $("branchStatStaff").textContent = s.total_people || 0;
     if ($("branchStatTechs")) $("branchStatTechs").textContent = s.total_technicians || 0;
     if ($("branchStatStockItems")) $("branchStatStockItems").textContent = s.total_stock_items || 0;
@@ -6773,7 +6790,7 @@ function renderAdminBranches() {
 
   const query = ($("requestSearch")?.value || "").trim().toLowerCase();
   const filtered = directoryRows.filter((item) =>
-    [item.branch_code, item.branch_name, item.name, item.manager_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode, item.dealer_companies]
+    [item.branch_code, item.branch_name, item.name, item.manager_name, item.parent_company_name, item.company_name, item.email, item.phone, item.mobile, item.address, item.pincode, item.dealer_companies, 'multi brand local dealer', 'multi-brand local dealer']
       .join(" ")
       .toLowerCase()
       .includes(query)
@@ -6783,7 +6800,7 @@ function renderAdminBranches() {
     ? filtered.map((b) => {
         const isPwSet = Boolean(b.password_set || b.password_set_at);
         const isAccessActive = b.is_active !== false;
-        const isDealer = Boolean(b.is_dealer_franchise || b.dealer_companies);
+        const isDealer = Boolean(b.is_dealer_franchise || b.dealer_companies || b.is_dual_registered);
         let statusBadge = "";
         if (!isPwSet) {
           statusBadge = '<span class="status-pill pending">Pending Setup</span>';
@@ -6791,6 +6808,23 @@ function renderAdminBranches() {
           statusBadge = '<span class="status-pill completed">Active</span>';
         } else {
           statusBadge = '<span class="status-pill cancelled">Disabled</span>';
+        }
+
+        const parentName = b.parent_company_name || (b.company_name && b.company_name !== "Multi-Brand Local Dealer Hub" && b.company_name !== "ServSure Network" ? b.company_name : null);
+        let parentCompanyCell = "";
+        if (parentName && isDealer) {
+          parentCompanyCell = `
+            <div class="space-y-1">
+              <span class="inline-flex items-center gap-1 font-bold text-slate-900 text-xs">🏢 ${safe(parentName)}</span>
+              <span class="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">🏪 Multi-Brand Local Dealer</span>
+            </div>
+          `;
+        } else if (parentName) {
+          parentCompanyCell = `<span class="inline-flex items-center gap-1 font-semibold text-slate-800 text-xs">🏢 ${safe(parentName)}</span>`;
+        } else if (isDealer) {
+          parentCompanyCell = `<span class="inline-flex items-center gap-1 font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full text-xs">🏪 Multi-Brand Local Dealer</span>`;
+        } else {
+          parentCompanyCell = `<span class="inline-flex items-center gap-1 font-semibold text-slate-800 text-xs">🏢 ${safe(b.company_name || "ServSure Partner")}</span>`;
         }
 
         return `
@@ -6805,7 +6839,7 @@ function renderAdminBranches() {
             ${b.dealer_companies ? `<small class="text-[10px] text-blue-600 block mt-0.5 font-medium">🏷️ Brands: ${safe(b.dealer_companies)}</small>` : ''}
           </td>
           <td>
-            <span class="inline-flex items-center gap-1 font-semibold text-slate-800">${isDealer ? '🏪 Multi-Brand Local Dealer' : `🏢 ${safe(b.company_name || "ServSure Partner")}`}</span>
+            ${parentCompanyCell}
           </td>
           <td>
             <span class="block text-slate-700 text-xs">✉️ ${safe(b.email)}</span>
@@ -9968,9 +10002,10 @@ function initEvents() {
   function renderPreaddedBranchesList() {
     const listContainer = $("preaddedBranchesList");
     if (!listContainer) return;
+
     const q = ($("preaddedBranchSearchInput")?.value || "").trim().toLowerCase();
     const filtered = preaddedBranches.filter((b) => {
-      return [b.branch_code, b.branch_name, b.company_name, b.pincode, b.manager_name, b.email]
+      return [b.branch_code, b.branch_name, b.company_name, b.parent_company_name, b.pincode, b.manager_name, b.email, b.dealer_companies]
         .join(" ")
         .toLowerCase()
         .includes(q);
@@ -9981,12 +10016,13 @@ function initEvents() {
     }
 
     if (filtered.length === 0) {
-      listContainer.innerHTML = `<div class="text-center py-6 text-xs text-slate-400">No pre-added company branches match "${safe(q)}".</div>`;
+      listContainer.innerHTML = `<div class="text-center py-6 text-xs text-slate-400">${q ? `No pre-added company branches match "${safe(q)}".` : 'No pre-added company branches available.'}</div>`;
       return;
     }
 
     listContainer.innerHTML = filtered.map((b) => {
       const isSelected = selectedPreaddedBranch && selectedPreaddedBranch.id === b.id;
+      const isDealer = Boolean(b.is_dealer_franchise || b.dealer_companies || b.is_dual_registered);
       return `
         <div class="preadded-branch-item p-3 rounded-xl border ${isSelected ? 'border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20' : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50/80'} cursor-pointer transition shadow-xs" data-preadded-id="${safe(b.id)}">
           <div class="flex items-start justify-between gap-2">
@@ -9994,11 +10030,12 @@ function initEvents() {
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-mono text-xs font-black text-blue-700 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-md">${safe(b.branch_code || 'BR-PENDING')}</span>
                 <strong class="text-xs font-bold text-slate-900">${safe(b.branch_name)}</strong>
-                ${b.is_dual_registered ? '<span class="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded-full">Dual Partner</span>' : ''}
+                ${isDealer ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">🏪 Multi-Brand Local Dealer</span>' : ''}
               </div>
               <div class="text-[11px] text-slate-600">
-                Parent Company: <strong class="text-slate-800">🏢 ${safe(b.company_name || 'OEM Company')}</strong>
+                Parent Company: <strong class="text-slate-800">🏢 ${safe(b.company_name || b.parent_company_name || 'OEM Company')}</strong>
               </div>
+              ${b.dealer_companies ? `<div class="text-[10px] text-blue-600 font-medium">Represented Brands: ${safe(b.dealer_companies)}</div>` : ''}
               <div class="text-[11px] text-slate-500">
                 Manager: <span class="font-medium text-slate-700">${safe(b.manager_name || '—')}</span> · 📞 ${safe(b.mobile || '—')} · 📍 PIN: <span class="font-mono font-bold text-slate-700">${safe(b.pincode || '—')}</span>
               </div>
@@ -10296,6 +10333,10 @@ function initEvents() {
           directoryRows[idx] = { ...directoryRows[idx], ...branchData };
         } else {
           directoryRows.unshift(branchData);
+        }
+        const preIdx = preaddedBranches.findIndex((b) => b.id === branchData.id);
+        if (preIdx >= 0) {
+          preaddedBranches[preIdx] = { ...preaddedBranches[preIdx], ...branchData };
         }
         renderAdminBranches();
         resetPreaddedBranchState();

@@ -320,6 +320,7 @@ def list_directory(role: str, request: Request, db: Session = Depends(get_db)):
                 "manager_name": b.manager_name,
                 "company_id": b.company_id,
                 "company_name": company.name if company else ("Multi-Brand Local Dealer Hub" if getattr(b, "is_dealer_franchise", False) or getattr(b, "dealer_companies", None) else "ServSure Network"),
+                "parent_company_name": company.name if company else None,
                 "email": b.email,
                 "phone": b.mobile,
                 "mobile": b.mobile,
@@ -780,6 +781,95 @@ def send_company_credentials(payload: CompanyCredentialsEmail, request: Request,
 def create_admin_branch(payload: CompanyBranchCreate, request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
     email = payload.email.strip().lower()
+    existing_branch = db.query(CompanyBranchModel).filter(CompanyBranchModel.email.ilike(email)).first()
+    if existing_branch:
+        # Existing branch already registered with a company or network: update in place without creating duplicate accounts
+        if payload.branch_name and payload.branch_name.strip():
+            existing_branch.branch_name = payload.branch_name.strip()
+        if payload.manager_name and payload.manager_name.strip():
+            existing_branch.manager_name = payload.manager_name.strip()
+        if payload.mobile and payload.mobile.strip():
+            existing_branch.mobile = payload.mobile.strip()
+        if payload.address and payload.address.strip():
+            existing_branch.address = payload.address.strip()
+        if payload.pincode and payload.pincode.strip():
+            existing_branch.pincode = payload.pincode.strip()
+
+        dealer_companies_val = (payload.dealer_companies or "").strip() or None
+        if dealer_companies_val:
+            old_cos = [c.strip() for c in (existing_branch.dealer_companies or "").split(",") if c.strip()]
+            new_cos = [c.strip() for c in dealer_companies_val.split(",") if c.strip()]
+            combined = list(dict.fromkeys(old_cos + new_cos))
+            existing_branch.dealer_companies = ", ".join(combined) if combined else None
+            existing_branch.is_dual_registered = True
+            existing_branch.is_dealer_franchise = True
+            existing_branch.registration_mode = "dual"
+
+        if not existing_branch.branch_code:
+            clean_id = (existing_branch.id or "").replace("branch_", "").replace("-", "")
+            existing_branch.branch_code = f"BR-{clean_id[:6].upper()}"
+
+        db.commit()
+        db.refresh(existing_branch)
+
+        branch_user = db.query(UserModel).filter((UserModel.id == existing_branch.id) | (UserModel.email.ilike(existing_branch.email))).first()
+        onb = db.query(BranchOnboardingModel).filter(BranchOnboardingModel.branch_id == existing_branch.id).first()
+        is_pw_set = bool(onb and onb.password_set_at)
+
+        parent_company = db.query(UserModel).filter(UserModel.id == existing_branch.company_id).first() if existing_branch.company_id else None
+        comp_name = parent_company.name if parent_company else ("Multi-Brand Local Dealer Hub" if getattr(existing_branch, "is_dealer_franchise", False) or getattr(existing_branch, "dealer_companies", None) else "ServSure Network")
+
+        branch_ids = [existing_branch.id]
+        if branch_user and branch_user.id != existing_branch.id:
+            branch_ids.append(branch_user.id)
+        tech_links = db.query(BranchTechnicianModel).filter(BranchTechnicianModel.branch_id.in_(branch_ids)).all()
+        linked_tech_ids = [tl.technician_id for tl in tech_links]
+        named_tech_ids = [
+            t.id for t in db.query(TechnicianModel).filter(
+                TechnicianModel.company_branch.ilike(existing_branch.branch_name.strip())
+            ).all()
+        ] if existing_branch.branch_name else []
+        assigned_tech_ids = list(set(linked_tech_ids + named_tech_ids))
+        tech_count = len(assigned_tech_ids)
+
+        job_filters = [ServiceRequestModel.branch_id.in_(branch_ids)]
+        if assigned_tech_ids:
+            job_filters.append(ServiceRequestModel.technician_id.in_(assigned_tech_ids))
+        if existing_branch.pincode and len(existing_branch.pincode.strip()) == 6:
+            job_filters.append(ServiceRequestModel.pincode == existing_branch.pincode.strip())
+        jobs_query = db.query(ServiceRequestModel).filter(or_(*job_filters))
+        jobs_count = jobs_query.count()
+        ongoing_jobs = jobs_query.filter(ServiceRequestModel.status_badge != "Completed").count()
+
+        return {
+            "id": existing_branch.id,
+            "branch_code": existing_branch.branch_code,
+            "name": existing_branch.branch_name,
+            "branch_name": existing_branch.branch_name,
+            "manager_name": existing_branch.manager_name,
+            "company_id": existing_branch.company_id,
+            "company_name": comp_name,
+            "parent_company_name": parent_company.name if parent_company else None,
+            "email": existing_branch.email,
+            "phone": existing_branch.mobile,
+            "mobile": existing_branch.mobile,
+            "address": existing_branch.address,
+            "pincode": existing_branch.pincode,
+            "dealer_companies": existing_branch.dealer_companies,
+            "is_dealer_franchise": existing_branch.is_dealer_franchise,
+            "is_dual_registered": existing_branch.is_dual_registered,
+            "registration_mode": existing_branch.registration_mode,
+            "is_active": branch_user.is_active if branch_user else False,
+            "password_set": is_pw_set,
+            "password_set_at": onb.password_set_at.isoformat() + "Z" if (onb and onb.password_set_at) else None,
+            "created_at": existing_branch.created_at.isoformat() + "Z" if existing_branch.created_at else None,
+            "total_techs": tech_count,
+            "total_jobs": jobs_count,
+            "ongoing_jobs": ongoing_jobs,
+            "role": "branch",
+            "avatar": existing_branch.branch_name[:2].upper()
+        }
+
     if db.query(UserModel).filter(UserModel.email.ilike(email)).first():
         raise HTTPException(status_code=409, detail="A ServSure account with this email already exists")
     if not os.getenv("BREVO_API_KEY") or not os.getenv("BREVO_SENDER_EMAIL"):
@@ -889,12 +979,16 @@ def create_admin_branch(payload: CompanyBranchCreate, request: Request, db: Sess
 def list_preadded_company_branches(request: Request, db: Session = Depends(get_db)):
     require_admin(request, db)
     companies_by_id = {u.id: u for u in db.query(UserModel).filter(UserModel.role == "company").all()}
-    branches = db.query(CompanyBranchModel).order_by(CompanyBranchModel.branch_name).all()
+    all_branches = db.query(CompanyBranchModel).order_by(CompanyBranchModel.branch_name).all()
 
     result = []
-    for b in branches:
+    for b in all_branches:
+        # Preadded branches must belong to an active OEM company
+        if b.company_id not in companies_by_id:
+            continue
+
         company = companies_by_id.get(b.company_id)
-        c_name = company.name if company else ("Multi-Brand Local Dealer Hub" if getattr(b, "is_dealer_franchise", False) or getattr(b, "dealer_companies", None) else "Registered Company")
+        c_name = company.name if company else "Registered Company"
         b_code = getattr(b, "branch_code", None) or f"BR-{b.id.replace('branch_', '')[:6].upper()}"
         result.append({
             "id": b.id,
@@ -902,6 +996,7 @@ def list_preadded_company_branches(request: Request, db: Session = Depends(get_d
             "branch_name": b.branch_name,
             "company_id": b.company_id,
             "company_name": c_name,
+            "parent_company_name": c_name,
             "manager_name": b.manager_name,
             "email": b.email,
             "mobile": b.mobile,
@@ -954,9 +1049,31 @@ def configure_preadded_branch(payload: PreaddedBranchConfigure, request: Request
     db.commit()
     db.refresh(branch)
 
-    branch_user = db.query(UserModel).filter((UserModel.id == branch.id) | (UserModel.email == branch.email)).first()
+    branch_user = db.query(UserModel).filter((UserModel.id == branch.id) | (UserModel.email.ilike(branch.email))).first()
     onb = db.query(BranchOnboardingModel).filter(BranchOnboardingModel.branch_id == branch.id).first()
     is_pw_set = bool(onb and onb.password_set_at)
+
+    branch_ids = [branch.id]
+    if branch_user and branch_user.id != branch.id:
+        branch_ids.append(branch_user.id)
+    tech_links = db.query(BranchTechnicianModel).filter(BranchTechnicianModel.branch_id.in_(branch_ids)).all()
+    linked_tech_ids = [tl.technician_id for tl in tech_links]
+    named_tech_ids = [
+        t.id for t in db.query(TechnicianModel).filter(
+            TechnicianModel.company_branch.ilike(branch.branch_name.strip())
+        ).all()
+    ] if branch.branch_name else []
+    assigned_tech_ids = list(set(linked_tech_ids + named_tech_ids))
+    tech_count = len(assigned_tech_ids)
+
+    job_filters = [ServiceRequestModel.branch_id.in_(branch_ids)]
+    if assigned_tech_ids:
+        job_filters.append(ServiceRequestModel.technician_id.in_(assigned_tech_ids))
+    if branch.pincode and len(branch.pincode.strip()) == 6:
+        job_filters.append(ServiceRequestModel.pincode == branch.pincode.strip())
+    jobs_query = db.query(ServiceRequestModel).filter(or_(*job_filters))
+    jobs_count = jobs_query.count()
+    ongoing_jobs = jobs_query.filter(ServiceRequestModel.status_badge != "Completed").count()
 
     return {
         "success": True,
@@ -969,6 +1086,7 @@ def configure_preadded_branch(payload: PreaddedBranchConfigure, request: Request
             "manager_name": branch.manager_name,
             "company_id": branch.company_id,
             "company_name": company_name,
+            "parent_company_name": company.name if company else None,
             "email": branch.email,
             "phone": branch.mobile,
             "mobile": branch.mobile,
@@ -982,9 +1100,9 @@ def configure_preadded_branch(payload: PreaddedBranchConfigure, request: Request
             "password_set": is_pw_set,
             "password_set_at": onb.password_set_at.isoformat() + "Z" if (onb and onb.password_set_at) else None,
             "created_at": branch.created_at.isoformat() + "Z" if branch.created_at else None,
-            "total_techs": 0,
-            "total_jobs": 0,
-            "ongoing_jobs": 0,
+            "total_techs": tech_count,
+            "total_jobs": jobs_count,
+            "ongoing_jobs": ongoing_jobs,
             "role": "branch",
             "avatar": branch.branch_name[:2].upper()
         }

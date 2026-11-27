@@ -4,8 +4,8 @@ PRODUCTION-GRADE TECHNICAL ARCHITECTURE & DEVELOPER ONBOARDING MANUAL
 ================================================================================
 File: documentation.txt
 Platform: ServSure (formerly Servora)
-Version: 2.3.5 (Production Feature - Pre-added Company Branch Selection, Branch Codes & Multi-Brand Representation Config in Admin Portal)
-Last Updated: November 22, 2026 (18:25 IST)
+Version: 2.3.7 (Production Feature - Multi-Brand Partner Retention & Dual Entity Display for Pre-added Company Branches)
+Last Updated: November 27, 2026 (13:45 IST)
 Repository: https://github.com/SID0428/servora.git
 
 Welcome to ServSure! This manual is the definitive, authoritative reference
@@ -671,9 +671,15 @@ Request Headers:
 - `PUT /api/admin/branches/{branch_id}/access`:
   - Body: `{ "is_active": false }`
   - Toggles franchise branch access and revokes active sessions with cascading revocation.
+- `GET /api/admin/preadded-branches`:
+  - Returns branches registered by onboarded OEM companies eligible for administration/franchise configuration.
+  - Includes `parent_company_name`, `branch_code`, `dealer_companies`, `is_dual_registered`, and `registration_mode`.
+- `POST /api/admin/branches/configure-preadded`:
+  - Body: `{ "branch_id": "...", "partnership_mode": "current_only" | "add_more", "dealer_companies": "...", "manager_name": "...", "mobile": "...", "address": "...", "pincode": "..." }`
+  - Configures franchise partnership for a pre-added company branch without creating a new duplicate user account or losing existing branch associations (`company_id`, technicians, inventory, or active jobs).
+  - Returns full branch payload including `parent_company_name`, live `total_techs`, `total_jobs`, and `ongoing_jobs`.
 - `GET /api/admin/directory/{role}`:
-  - Role `"branch"`: Returns comprehensive list of all franchise branches with branch name, address, pincode, parent company name (`company_name`), manager name, mobile, active status, technician count (`technician_count`), job count (`jobs_count`), `created_at`, `password_set`, and `password_set_at`.
-  - Role `"branch"`: Returns comprehensive list of all franchise branches with branch name, address, pincode, parent company name (`company_name`), manager name, mobile, active status, technician count (`technician_count`), job count (`jobs_count`), `dealer_companies`, `is_dealer_franchise` (with Local Dealer Hub badge), `created_at`, `password_set`, and `password_set_at`.
+  - Role `"branch"`: Returns comprehensive list of all franchise branches with branch name, address, pincode, parent company name (`parent_company_name` / `company_name`), manager name, mobile, active status, technician count (`technician_count`), job count (`jobs_count`), `dealer_companies`, `is_dealer_franchise`, `is_dual_registered` (supporting dual display of both parent OEM company and Multi-Brand Local Dealer badge), `created_at`, `password_set`, and `password_set_at`.
   - Role `"technician"`: Returns list of all technicians with title/specialty, assigned branch name (`branch_name`), parent company name (`company_name`), mobile, rating, total jobs (`total_jobs`), active status, `created_at`, `password_set`, and `password_set_at`.
   - Role `"customer"`: Returns list of customer users with phone, address, registered appliances count (`appliances_count`), total service requests (`total_requests`), ongoing requests (`ongoing_requests`), completed requests (`completed_requests`), `created_at`, and active status.
   - Role `"company"`: Returns onboarded companies with contact details, `created_at`, `password_set_at`, and onboarding status.
@@ -2703,9 +2709,10 @@ were identified between the initial rough draft documentation and the actual cod
         - JavaScript syntax checked via `node --check`.
         - Automated database and model assertions verified schema migration, request detail formatting, and dual user payload creation.
 
-30. PRE-ADDED COMPANY BRANCH SELECTION, BRANCH CODES & FRANCHISE PARTNERSHIP CONFIGURATION (v2.3.5)
+30. PRE-ADDED COMPANY BRANCH SELECTION, BRANCH CODES & FRANCHISE PARTNERSHIP CONFIGURATION (v2.3.6)
     - Purpose:
       - Enable platform administrators in the Admin Portal to select branches already registered by OEM companies and configure franchise representation without re-creating conflicting user accounts.
+      - Automatically filter out and exclude branches that are already individually added (e.g. standalone dealer hubs, dual partner franchises, or branches sharing matching email or location signatures with individually added branches) so they never appear redundantly in the pre-added list.
       - Introduce permanent, memorable branch codes (e.g. `BR-F9812A`) for every branch to facilitate rapid search, tracking, and customer referencing.
       - Support configuring franchise representation:
         1. Option A: "Only those which were registered currently" (Exclusive single-brand OEM branch).
@@ -2718,6 +2725,7 @@ were identified between the initial rough draft documentation and the actual cod
     - Backend API Architecture:
       - `GET /api/admin/preadded-branches`:
         - Returns all branches registered across companies with parent company name, manager name, contact info, PIN, branch code, and current representation mode.
+        - Strict Exclusion Filter: Collects signatures (`individual_branch_ids`, `individual_emails`, `individual_names_and_pins`) of all branches that are already individually added (`is_dealer_franchise == True`, `is_dual_registered == True`, `dealer_companies` set, `registration_mode in ("individual", "dealer", "dual")`, or `company_id not in companies_by_id`). Any branch that is already individually added or matches an individually added signature is excluded from the returned pre-added list.
       - `POST /api/admin/branches/configure-preadded`:
         - Payload: `PreaddedBranchConfigure` (`branch_id`, `partnership_mode`, `dealer_companies`, optional manager, mobile, address, pincode).
         - Configures the pre-added branch without duplicate user account conflict:
@@ -2744,11 +2752,63 @@ were identified between the initial rough draft documentation and the actual cod
       - Script Controller (`frontend/js/ops-dashboard.js`):
         - `switchBranchDialogMode(mode)` switches between pre-added and standalone tabs and toggles input `required` attributes.
         - `loadAndRenderPreaddedBranches()` fetches `/api/admin/preadded-branches` and populates the list.
+        - `renderPreaddedBranchesList()` applies dual-layer validation filtering out any branches that are already individually added in `directoryRows` or local state.
+        - When a pre-added branch is configured via `configure-preadded`, it is immediately filtered out of `preaddedBranches`.
         - `renderAdminBranches()` and `renderCompanyBranches()` display the Branch Code badge (`<span class="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">BR-...</span>`) and include `branch_code` in table search queries.
     - Verification:
       - Syntax check passed: `node --check frontend/js/ops-dashboard.js`.
       - Python compilation passed: `python3 -m py_compile backend/app/db/models.py backend/app/seeds.py backend/app/schemas/__init__.py backend/app/routes/admin.py backend/app/routes/company.py`.
-      - Automated API test verified pre-added branches query, `current_only` configuration, `add_more` multi-brand configuration, and branch code indexing.
+
+31. MULTI-BRAND PARTNERSHIP RETENTION & DUAL STATUS DISPLAY FOR PRE-ADDED COMPANY BRANCHES (v2.3.7)
+    - Purpose:
+      - When an administrator configures a pre-added company branch in the Admin Portal and expands it with additional partner companies/brands:
+        1. Account & Ownership Retention: The branch MUST NOT create a new duplicate user account or detach from its parent OEM company. The branch's original `company_id` and user credentials remain intact.
+        2. Asset & Data Preservation: Existing operational data associated with the branch (assigned technicians, warehouse spare parts inventory, stock movements, and active/ongoing service request workload) MUST NOT be wiped out or reset to zeroes upon configuration or viewing.
+        3. Dual Status Display in Admin Portal: In the Admin Portal's Branches directory, the table MUST display BOTH the parent OEM company name (e.g. "🏢 Crompton Appliances Ltd") AND the multi-brand badge ("🏪 Multi-Brand Local Dealer"), instead of mutually hiding either entity.
+    - Backend Enhancements:
+      - `backend/app/routes/admin.py`:
+        - `GET /api/admin/preadded-branches`:
+          - Preserves parent company branches regardless of whether they have already been configured with dealer companies or dual registration, allowing continuous brand expansion while linking them to their original parent OEM.
+          - Injects `parent_company_name` directly into the pre-added branches payload.
+        - `POST /api/admin/branches/configure-preadded`:
+          - Preserves `branch.company_id` under its parent OEM company.
+          - Calculates real-time `total_techs` from `BranchTechnicianModel` and `TechnicianModel`, and `total_jobs` / `ongoing_jobs` from `ServiceRequestModel`, preventing frontend directory row metrics from zeroing out.
+          - Returns enriched payload including `parent_company_name`, `total_techs`, `total_jobs`, and `ongoing_jobs`.
+        - `POST /api/admin/branches` (Standalone Fallback):
+          - In the event of duplicate branch email submission, safely intercepts existing branch records, updates `dealer_companies`, flags `is_dual_registered = True`, computes live technician and job counts, and avoids throwing 409 Conflict or creating orphaned user rows.
+        - `GET /api/admin/directory?entity=branch`:
+          - Resolves and attaches `parent_company_name` via company relationship for every branch.
+      - `backend/app/routes/company.py`:
+        - `branch_payload()` helper:
+          - Enriched with `company_id`, `dealer_companies`, `is_dealer_franchise`, `is_dual_registered`, and `registration_mode`.
+        - `GET /api/company/branches/{branch_id}/details`:
+          - When accessed by administrators (`current_user.role == "admin"`), lifts company-scoped inventory filtering so multi-brand hub inventory (`FranchiseInventoryModel`), transactions (`InventoryTransactionModel`), and assigned technicians remain fully visible.
+    - Frontend Enhancements:
+      - `frontend/admin-dashboard.html` & `frontend/ops-dashboard.html`:
+        - Updated `#branchDetailModal` with dedicated containers:
+          - `#branchModalParentCompany`: displays primary parent OEM company badge.
+          - `#branchModalDealerBadge`: displays `🏪 Multi-Brand Local Dealer` status tag.
+          - `#branchModalBrands`: renders chips for all partner brands represented by the branch.
+        - Modal tab label updated to `<span>🏢</span> Add Pre-added Branch (from Company)`.
+      - `frontend/js/ops-dashboard.js`:
+        - `renderAdminBranches()`:
+          - Parent Company column renders BOTH the parent company name (`🏢 [Company Name]`) AND the multi-brand badge (`🏪 Multi-Brand Local Dealer` tag) when `is_dual_registered` or `dealer_companies` are present.
+          - Directory search filter matches both `parent_company_name` and `'multi brand local dealer'`.
+        - `openCompanyBranchDetail()`:
+          - Binds `branchModalParentCompany`, `branchModalDealerBadge`, and partner brand tags.
+        - `renderPreaddedBranchesList()`:
+          - Shows parent OEM company name and existing partner dealer brands on each candidate card.
+        - `branchForm` submission handler:
+          - Optimistically updates `preaddedBranches` and updates `directoryRows` in-place with real technician and workload counts returned by the server.
+    - Verification:
+      - Python compilation passed: `python3 -m py_compile backend/app/routes/admin.py backend/app/routes/company.py`.
+      - JavaScript syntax check passed: `node --check frontend/js/ops-dashboard.js`.
+      - Direct API and database integration test executed via `test_preadded_branch_verification.py`:
+        - Step A: Pre-added company branch discovery with parent company metadata.
+        - Step B: Pre-added branch configuration retaining parent company ID, user account ID, and technician links.
+        - Step C: Directory listing returning both parent company and multi-brand status, with technician counts preserved.
+        - Step D: Deep-dive modal details returning unmasked technicians and parts inventory.
+        - Step E: Fallback branch creation safely updating existing branch without duplicate user account creation.
 
 ==================================================
 End of Documentation
